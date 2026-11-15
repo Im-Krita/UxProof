@@ -47,27 +47,29 @@ check(ai.warnings.some(item => item.includes('OPENAI_API_KEY')), `нет пре�
 check(ai.issues.every(item => item.status !== 'recommendation'), 'рекомендация появилась без модели');
 check(!JSON.stringify(ai).includes('sk-'), 'в отчёте есть похожий на ключ фрагмент');
 
-const server = spawn(process.execPath, ['runner/dev-server.mjs'], { stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.execPath, ['runner/dev-server.mjs'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, UXPROOF_DEV_PORT: '0' } });
 try {
-  await new Promise((resolve, reject) => {
+  const apiBase = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(Error('dev API не поднялся')), 8000);
-    const onData = chunk => { if (String(chunk).includes('4179')) { clearTimeout(timer); resolve(); } };
+    let output = '';
+    const onData = chunk => { output += String(chunk); const match = output.match(/UXProof runner dev API: (http:\/\/127\.0\.0\.1:\d+)/); if (match) { clearTimeout(timer); resolve(match[1]); } };
     server.stdout.on('data', onData);
     server.stderr.on('data', onData);
     server.on('exit', code => reject(Error(`dev API завершился: ${code}`)));
   });
-  const blocked = await fetch('http://127.0.0.1:4179/api/image?runId=..&file=secret.png');
+  const blocked = await fetch(`${apiBase}/api/image?runId=..&file=secret.png`);
   check(blocked.status === 400, `path traversal вернул ${blocked.status}`);
-  const header = await fetch('http://127.0.0.1:4179/api/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const header = await fetch(`${apiBase}/api/run`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   check(header.status === 403, `запрос без заголовка вернул ${header.status}`);
-  const fileUrl = await fetch('http://127.0.0.1:4179/api/run', {
+  const fileUrl = await fetch(`${apiBase}/api/run`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-uxproof-client': '1' },
     body: JSON.stringify({ baseUrl: 'javascript:alert(1)', scenarios: [{ title: 'x', steps: [{ type: 'click', target: 'css:#a', value: '' }] }], viewports: [{ width: 800, height: 600 }] })
   });
   check(fileUrl.status === 400, `javascript URL вернул ${fileUrl.status}`);
 } finally {
-  if (server.pid) spawnSync('taskkill', ['/pid', String(server.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
+  if (server.pid && process.platform === 'win32') spawnSync('taskkill', ['/pid', String(server.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
+  else if (server.pid) server.kill();
 }
 
 if (failures.length) {
