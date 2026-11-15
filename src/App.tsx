@@ -6,6 +6,7 @@ import type { AuditConfig, AuditReport, AuditStep, Issue, Panel, Scenario, StepT
 import type { NormalizedFinding } from './lib/types';
 import { downloadJson, exportHtml, listReports, runAudit, screenshotUrl } from './lib/bridge';
 import { compareFindings, presentableFindings, recheckedSteps } from '../runner/matching.mjs';
+import { screenshotOutline } from '../runner/geometry-view.mjs';
 
 const STEP_TYPES=Object.keys(STEP_LABELS) as StepType[];
 function clientUrlError(value:string) {
@@ -37,6 +38,7 @@ export default function App() {
  const [selectedRun,setSelectedRun]=useState<string>('');
  const [screenshot,setScreenshot]=useState('');
  const [shotFailed,setShotFailed]=useState(false);
+ const [shotSize,setShotSize]=useState<{width:number;height:number}|null>(null);
  const importRef=useRef<HTMLInputElement|null>(null);
  const busyRef=useRef(false);
  const closeRef=useRef<HTMLButtonElement|null>(null);
@@ -47,6 +49,7 @@ export default function App() {
  useEffect(()=>{
    setScreenshot('');
    setShotFailed(false);
+   setShotSize(null);
    if(!activeIssue?.screenshot || !currentReport) return;
    let live=true;
    screenshotUrl(currentReport.runId,activeIssue.screenshot).then(u=>{if(live)setScreenshot(u);}).catch(()=>{});
@@ -114,6 +117,7 @@ export default function App() {
    event.target.value='';
  };
  const menu=[{id:'scenarios' as Panel,label:'Сценарии',icon:ListChecks},{id:'results' as Panel,label:'Результаты',icon:LayoutDashboard},{id:'history' as Panel,label:'История проверок',icon:FileClock}];
+ const outline=currentReport&&activeIssue?.screenshot&&shotSize?screenshotOutline(currentReport,activeIssue.screenshot,shotSize.width,shotSize.height):null;
  return <div className="app-shell">
    <aside className="sidebar">
      <div className="logo"><div className="logo-symbol"><ShieldCheck size={23} strokeWidth={2.4}/></div><div><div className="logo-name">UXProof</div><div className="logo-sub">Quality workspace</div></div><span className="version">BETA</span></div>
@@ -147,7 +151,7 @@ export default function App() {
        {panel==='history'&&<><div className="page-head"><div><div className="eyebrow">ЛОКАЛЬНО СОХРАНЁННЫЕ ОТЧЁТЫ</div><h1>История проверок</h1><p>Прошлые запуски сохраняются локально. Выбери отчет, чтобы увидеть результаты.</p></div><button className="btn secondary" onClick={()=>listReports().then(setHistory).catch(e=>setError(String(e)))}><RotateCcw size={16}/> Обновить</button></div>{history.length?<div className="history-layout"><div className="panel-card history-list">{history.map(r=><button key={r.runId} className={`history-entry ${selectedRun===r.runId?'selected':''}`} onClick={()=>{setSelectedRun(r.runId);setIssueFilter('all');setActiveIssue(null);}}><div className="history-top"><span>{formatDate(r.startedAt)}</span><span>{r.summary.passedRuns}/{r.summary.totalRuns}</span></div><b>{r.project}</b><small>{r.summary.confirmedIssues} подтверждённых замечаний</small></button>)}</div><div>{currentReport?<ReportSection report={currentReport} issues={filteredIssues} issueFilter={issueFilter} setIssueFilter={setIssueFilter} onIssue={setActiveIssue} onExport={()=>exportReport(currentReport)} onJson={()=>downloadJson(`uxproof-${currentReport.runId}.json`,currentReport)} onBack={()=>setPanel('scenarios')} compact/>:<div className="panel-card history-placeholder"><FileClock size={35}/><b>Выбери проверку слева</b><span>Отчет откроется здесь.</span></div>}</div></div>:<EmptyState title="История пуста" description="После первого реального запуска отчёт появится в этом разделе." action="Новый аудит" onAction={()=>setPanel('scenarios')}/>}</>}
      </main>
    </div>
-   {activeIssue&&currentReport&&<div className="modal-overlay" onClick={()=>setActiveIssue(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="issue-title" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><Confidence status={activeIssue.status}/><h2 id="issue-title">{activeIssue.title}</h2><div className="modal-sub"><Level severity={activeIssue.severity}/><span>{activeIssue.scenario} · {activeIssue.viewport}</span></div></div><button ref={closeRef} className="icon-btn" type="button" aria-label="Закрыть" onClick={()=>setActiveIssue(null)}><X size={20}/></button></div><div className="modal-body"><h3>Что обнаружено</h3><p>{activeIssue.description}</p>{activeIssue.reproduction&&<><h3>Как воспроизвести</h3><p className="reproduction">{activeIssue.reproduction}</p></>}{activeIssue.helpUrl?.startsWith('https://')&&<p><a href={activeIssue.helpUrl} target="_blank" rel="noreferrer">Описание правила axe-core <ExternalLink size={13}/></a></p>}<h3>Доказательство</h3>{screenshot&&!shotFailed?<img className="evidence-image" src={screenshot} alt={`Скриншот проверки: ${activeIssue.scenario}`} onError={()=>setShotFailed(true)}/>:<div className="no-image"><ImageIcon size={20}/> Скриншот отсутствует или загружается</div>}<p className="evidence-note">{activeIssue.status==='recommendation'?'Это предположение ИИ — подтвердите его вручную.':'Запись сформирована автоматическим тестом; при необходимости проверьте контекст вручную.'}</p></div></div></div>}
+   {activeIssue&&currentReport&&<div className="modal-overlay" onClick={()=>setActiveIssue(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="issue-title" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><Confidence status={activeIssue.status}/><h2 id="issue-title">{activeIssue.title}</h2><div className="modal-sub"><Level severity={activeIssue.severity}/><span>{activeIssue.scenario} · {activeIssue.viewport}</span></div></div><button ref={closeRef} className="icon-btn" type="button" aria-label="Закрыть" onClick={()=>setActiveIssue(null)}><X size={20}/></button></div><div className="modal-body"><h3>Что обнаружено</h3><p>{activeIssue.description}</p>{activeIssue.reproduction&&<><h3>Как воспроизвести</h3><p className="reproduction">{activeIssue.reproduction}</p></>}{activeIssue.helpUrl?.startsWith('https://')&&<p><a href={activeIssue.helpUrl} target="_blank" rel="noreferrer">Описание правила axe-core <ExternalLink size={13}/></a></p>}<h3>Доказательство</h3>{screenshot&&!shotFailed?<div className="evidence-frame"><img className="evidence-image" src={screenshot} alt={`Скриншот проверки: ${activeIssue.scenario}`} onLoad={e=>setShotSize({width:e.currentTarget.naturalWidth,height:e.currentTarget.naturalHeight})} onError={()=>setShotFailed(true)}/>{outline&&<span className="evidence-outline" aria-label="Приблизительные границы проверенного элемента" style={{left:`${outline.left}%`,top:`${outline.top}%`,width:`${outline.width}%`,height:`${outline.height}%`}}/>}</div>:<div className="no-image"><ImageIcon size={20}/> Скриншот отсутствует или загружается</div>}{outline&&<p className="evidence-note">Рамка показывает положение элемента; страница могла измениться во время снимка.</p>}<p className="evidence-note">{activeIssue.status==='recommendation'?'Это предположение ИИ — подтвердите его вручную.':'Запись сформирована автоматическим тестом; при необходимости проверьте контекст вручную.'}</p></div></div></div>}
  </div>;
 }
 
