@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 // Identity is based only on explicit rule and anchor evidence, never on run metadata.
 export function findingId({ ruleId, anchor }) {
@@ -23,4 +23,18 @@ export function groupObservations(observations) {
     groups.get(id).observations.push(observation);
   }
   return [...groups.values()];
+}
+
+// Axe selectors identify nodes only within a page; do not guess when evidence is absent.
+export function axeObservations({ violation, pageUrl, scenarioId, viewportId, runId }) {
+  let url;
+  try { url = new URL(pageUrl); } catch { return []; }
+  if (!['http:', 'https:'].includes(url.protocol) || !violation?.id || !Array.isArray(violation.nodes)) return [];
+  const scope = `${url.origin}${url.pathname}`;
+  return violation.nodes.flatMap(node => {
+    if (!Array.isArray(node.target) || !node.target.length || node.target.some(part => typeof part !== 'string' || !part.trim())) return [];
+    return [{ observationId: randomUUID(), runId, scenarioId, viewportId,
+      ruleId: `axe:${violation.id}`, anchor: [scope, ...node.target], source: 'axe',
+      classification: 'rule-violation', status: 'confirmed' }];
+  });
 }

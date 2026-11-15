@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findingId, groupObservations } from '../findings.mjs';
+import { findingId, groupObservations, axeObservations } from '../findings.mjs';
 
 test('finding ID is stable across runs and viewport observations', () => {
   const a = { ruleId: 'axe:color-contrast', anchor: ['.warning'], runId: 'a', viewport: 'mobile' };
@@ -26,4 +26,17 @@ test('groups observations by explicit identity and preserves each observation', 
 test('missing identity evidence must not be silently merged', () => {
   assert.throws(() => findingId({ ruleId: 'axe:contrast', anchor: [] }));
   assert.throws(() => findingId({ ruleId: '', anchor: ['x'] }));
+});
+
+test('axe observations represent individual nodes and exclude URL query data', () => {
+  const input = { violation: { id: 'color-contrast', nodes: [{ target: ['.one'] }, { target: ['.two'] }] },
+    pageUrl: 'https://example.test/page?token=secret', scenarioId: 's', viewportId: 'v', runId: 'run' };
+  const observations = axeObservations(input);
+  assert.equal(observations.length, 2);
+  assert.notEqual(observations[0].observationId, observations[1].observationId);
+  assert.notEqual(findingId(observations[0]), findingId(observations[1]));
+  assert.ok(!JSON.stringify(observations).includes('secret'));
+  const again = axeObservations({ ...input, runId: 'another', viewportId: 'other' });
+  assert.equal(findingId(observations[0]), findingId(again[0]));
+  assert.equal(axeObservations({ ...input, violation: { id: 'x', nodes: [{ target: [] }] } }).length, 0);
 });

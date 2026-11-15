@@ -6,6 +6,7 @@ import { executeStep, safeName, validateConfig, evidenceType } from './validator
 import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
 import { assertAuditableUrl, assertRequestAllowed, baseTargetsLoopback } from './policy.mjs';
+import { axeObservations, groupObservations } from './findings.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -62,8 +63,10 @@ async function executeAudit(raw) {
     version: 1, runId, project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
-    summary: {}, results: [], issues: [], warnings: []
+    summary: {}, results: [], issues: [], warnings: [],
+    normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe'], note: 'Only axe nodes with explicit selectors are included.' }
   };
+  const observations = [];
   let browser;
   let aiCalls = 0;
   const blockedNotes = new Set();
@@ -88,6 +91,7 @@ async function executeAudit(raw) {
         };
         const runStart = Date.now();
         const issueStart = report.issues.length;
+        const observationStart = observations.length;
         let context;
         try {
           context = await browser.newContext({
@@ -140,6 +144,8 @@ async function executeAudit(raw) {
             try {
               const resultAxe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
               for (const violation of resultAxe.violations.slice(0, 15)) {
+                observations.push(...axeObservations({ violation, pageUrl: page.url(), runId,
+                  scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`) }));
                 report.issues.push({
                   id: `A11Y-${report.issues.length + 1}`, kind: 'accessibility', status: evidenceType('accessibility'),
                   severity: violation.impact === 'critical' || violation.impact === 'serious' ? 'high' : 'medium',
@@ -179,6 +185,9 @@ async function executeAudit(raw) {
             try {
               await page.screenshot({ path: path.join(screenshots, filename), fullPage: false, animations: 'disabled', timeout: 8000 });
               result.screenshot = filename;
+              for (let index = observationStart; index < observations.length; index++) {
+                observations[index].evidence = { screenshot: filename };
+              }
               for (let index = issueStart; index < report.issues.length; index++) {
                 if (!report.issues[index].screenshot) report.issues[index].screenshot = filename;
               }
@@ -223,6 +232,7 @@ async function executeAudit(raw) {
     if (browser) await browser.close().catch(() => {});
   }
   report.durationMs = Date.now() - start;
+  report.normalizedFindings = groupObservations(observations);
   report.summary = {
     totalRuns: report.results.length,
     passedRuns: report.results.filter(item => item.status === 'passed').length,
