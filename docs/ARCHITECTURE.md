@@ -66,7 +66,8 @@ flowchart LR
 UI: клик "Запустить аудит"
  -> validate config (Rust / Node dev)
  -> make runId, outputDir
- -> Playwright chromium.launch
+ -> local authenticated guard proxy (DNS validation and pinned destination IPs)
+ -> Playwright chromium.launch (proxy for HTTP(S), QUIC disabled)
  -> for each Scenario × Viewport:
       browser.newContext({ viewport })
       page.goto(baseUrl)
@@ -85,6 +86,8 @@ UI: клик "Запустить аудит"
 ```
 
 **Не сохраняем:** произвольные cookies, HAR, видеозаписи, полные DOM snapshots — это отложено во избежание лишней сложности и риска утечки данных. Маска снимка не распознаёт личные данные в обычном видимом тексте, именах шагов или сообщениях сайта; это остаётся ограничением приватности.
+
+Прокси проверяет назначения HTTP и CONNECT, включая redirect; разрешённые DNS-адреса передаются непосредственно соединению. Он не является полноценным сетевым sandbox ОС. Лимит в 10 000 применяется к действиям прокси, а не к каждому HTTPS-запросу внутри туннеля. Переход основного окна на другой origin выявляется после первой загрузки, до следующих сценарных действий; предотвращение самого первого запроса остаётся открытым.
 
 ## 5. Доверенная классификация
 

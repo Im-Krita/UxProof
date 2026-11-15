@@ -83,6 +83,14 @@ fn blocked_host(host: &str) -> bool {
         return (a == 169 && b == 254) || ip.is_unspecified() || ip.is_multicast();
     }
     if let Ok(ip) = host.parse::<std::net::Ipv6Addr>() {
+        if let Some(mapped) = ip.to_ipv4_mapped() {
+            return blocked_host(&mapped.to_string());
+        }
+        let parts = ip.segments();
+        if parts[0] == 0x64 && parts[1] == 0xff9b && parts[2..6].iter().all(|part| *part == 0) {
+            let embedded = Ipv4Addr::new((parts[6] >> 8) as u8, parts[6] as u8, (parts[7] >> 8) as u8, parts[7] as u8);
+            return blocked_host(&embedded.to_string());
+        }
         let link_local = ip.segments()[0] & 0xffc0 == 0xfe80;
         return ip.is_unspecified() || ip.is_multicast() || link_local;
     }
@@ -394,6 +402,12 @@ mod tests {
         let mut credentials = config();
         credentials["baseUrl"] = json!("http://user:secret@127.0.0.1:4180");
         assert!(validate(&credentials).is_err());
+        let mut mapped_metadata = config();
+        mapped_metadata["baseUrl"] = json!("http://[::ffff:169.254.169.254]/");
+        assert!(validate(&mapped_metadata).is_err());
+        let mut nat64_metadata = config();
+        nat64_metadata["baseUrl"] = json!("http://[64:ff9b::a9fe:a9fe]/");
+        assert!(validate(&nat64_metadata).is_err());
     }
 
     #[test]

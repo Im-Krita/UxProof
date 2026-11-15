@@ -5,11 +5,12 @@ import AxeBuilder from '@axe-core/playwright';
 import { executeStep, safeName, validateConfig, evidenceType } from './validators.mjs';
 import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
-import { assertAuditableUrl, assertRequestAllowed, baseTargetsLoopback } from './policy.mjs';
+import { assertRequestAllowed, prepareBasePolicy } from './policy.mjs';
 import { axeObservations, failedStepObservation, groupObservations } from './findings.mjs';
 import { comparisonKey } from './comparison.mjs';
 import { validateNormalizedReport } from './report-contract.mjs';
 import { screenshotWithRedaction } from './screenshot.mjs';
+import { startGuardProxy } from './guard-proxy.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -54,8 +55,7 @@ function maxDurationMs() {
 
 async function executeAudit(raw) {
   const config = validateConfig(raw);
-  await assertAuditableUrl(config.baseUrl);
-  const baseLoopback = await baseTargetsLoopback(config.baseUrl);
+  const basePolicy = await prepareBasePolicy(config.baseUrl);
   const outputDir = path.resolve(config.outputDir || '.uxproof-data/runs/dev');
   const screenshots = path.join(outputDir, 'screenshots');
   await fs.mkdir(screenshots, { recursive: true });
@@ -71,11 +71,21 @@ async function executeAudit(raw) {
   };
   const observations = [];
   let browser;
+  let proxy;
   let aiCalls = 0;
   const blockedNotes = new Set();
+  const recordBlocked = message => {
+    const note = String(message || '').slice(0, 160);
+    if (note.startsWith('Превышен лимит сетевых')) report.status = 'incomplete';
+    if (blockedNotes.size < 8 && !blockedNotes.has(note)) {
+      blockedNotes.add(note);
+      report.warnings.push(`Заблокирован запрос: ${note}`);
+    }
+  };
   bindShutdown();
   try {
-    browser = await chromium.launch({ headless: true, timeout: 45000, args: ['--disable-extensions'] });
+    proxy = await startGuardProxy({ baseUrl: config.baseUrl, basePolicy, onBlocked: recordBlocked });
+    browser = await chromium.launch({ headless: true, timeout: 45000, args: ['--disable-extensions', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
     activeBrowser = browser;
     outer: for (let sIdx = 0; sIdx < config.scenarios.length; sIdx++) {
       const scenario = config.scenarios[sIdx];
@@ -99,6 +109,7 @@ async function executeAudit(raw) {
         try {
           context = await browser.newContext({
             viewport: { width: vp.width, height: vp.height },
+            proxy: { server: proxy.server, username: proxy.username, password: proxy.password, bypass: '<-loopback>' },
             deviceScaleFactor: 1,
             reducedMotion: 'reduce',
             serviceWorkers: 'block'
@@ -107,38 +118,57 @@ async function executeAudit(raw) {
           page.setDefaultTimeout(8000);
           page.setDefaultNavigationTimeout(15000);
           const errors = [];
+          let outsideOrigin = false;
+          let navigationLoaded = false;
+          const assertCurrentOrigin = () => {
+            let currentOrigin = '';
+            try { currentOrigin = new URL(page.url()).origin; } catch { /* treated as outside the project */ }
+            if (currentOrigin === new URL(config.baseUrl).origin) return;
+            if (!outsideOrigin) {
+              outsideOrigin = true;
+              result.status = 'failed';
+              report.status = 'incomplete';
+              report.warnings.push('Переход за пределы адреса проекта обнаружен после загрузки; дальнейшие шаги остановлены.');
+              report.issues.push({ id: `NAV-${report.issues.length + 1}`, kind: 'functional', status: 'confirmed', severity: 'high',
+                title: 'Переход за пределы проекта', description: 'Обнаружен переход на другой origin; шаги и сбор доказательств остановлены.',
+                scenario: scenario.title, viewport: viewportLabel, screenshot: null });
+            }
+            throw Error('Переход за пределы адреса проекта');
+          };
           page.on('pageerror', error => errors.push(String(error?.message || error).slice(0, 500)));
           await context.route('**/*', async route => {
             try {
-              await assertRequestAllowed(route.request().url(), config.baseUrl, baseLoopback);
+              await assertRequestAllowed(route.request().url(), config.baseUrl, basePolicy.baseLoopback, undefined, basePolicy.addresses);
               await route.continue();
             } catch (error) {
-              const note = String(error?.message || error).slice(0, 160);
-              if (blockedNotes.size < 8 && !blockedNotes.has(note)) {
-                blockedNotes.add(note);
-                report.warnings.push(`Заблокирован запрос: ${note}`);
-              }
+              recordBlocked(error?.message || error);
               await route.abort('blockedbyclient').catch(() => {});
             }
           });
           try {
             await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            navigationLoaded = true;
+            assertCurrentOrigin();
             for (let i = 0; i < scenario.steps.length; i++) {
               const step = scenario.steps[i];
               const stamp = Date.now();
               const name = step.name || `${step.type}${step.target ? `: ${step.target}` : ''}`;
               try {
+                assertCurrentOrigin();
                 await executeStep(page, step, config.baseUrl);
+                assertCurrentOrigin();
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'passed', durationMs: Date.now() - stamp });
                 result.passedSteps++;
               } catch (error) {
                 const message = String(error?.message || error).split('\n')[0].slice(0, 450);
-                const observation = failedStepObservation({ pageUrl: page.url(), scenario, step, stepIndex: i, runId,
-                  scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`) });
-                if (observation) observations.push(observation);
+                if (!outsideOrigin) {
+                  const observation = failedStepObservation({ pageUrl: page.url(), scenario, step, stepIndex: i, runId,
+                    scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`) });
+                  if (observation) observations.push(observation);
+                }
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs: Date.now() - stamp, error: message });
                 result.status = 'failed';
-                report.issues.push({
+                if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',
                   title: `Шаг ${i + 1}: ${name}`, description: message, scenario: scenario.title, viewport: viewportLabel,
                   reproduction: `Открыть ${config.baseUrl} → ${scenario.steps.slice(0, i + 1).map(item => item.name || item.type).join(' → ')}`,
@@ -147,6 +177,8 @@ async function executeAudit(raw) {
                 break;
               }
             }
+            if (!outsideOrigin) { try { assertCurrentOrigin(); } catch { /* incident recorded above */ } }
+            if (!outsideOrigin) {
             try {
               const resultAxe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
               for (const violation of resultAxe.violations.slice(0, 15)) {
@@ -173,15 +205,17 @@ async function executeAudit(raw) {
                 });
               }
             } catch { /* страница уже закрыта */ }
+            }
           } catch (error) {
             const message = String(error.message || error).split('\n')[0].slice(0, 400);
             result.status = 'failed';
-            report.issues.push({
+            if (!outsideOrigin) report.issues.push({
               id: `NAV-${report.issues.length + 1}`, kind: 'functional', status: 'confirmed', severity: 'high',
               title: 'Не удалось открыть страницу', description: message, scenario: scenario.title, viewport: viewportLabel, screenshot: null
             });
           } finally {
-            for (const message of [...new Set(errors)].slice(0, 6)) {
+            if (navigationLoaded && !outsideOrigin) { try { assertCurrentOrigin(); } catch { /* incident recorded above */ } }
+            for (const message of outsideOrigin ? [] : [...new Set(errors)].slice(0, 6)) {
               report.issues.push({
                 id: `JS-${report.issues.length + 1}`, kind: 'javascript', status: 'confirmed', severity: 'high',
                 title: 'JavaScript exception', description: message, scenario: scenario.title, viewport: viewportLabel, screenshot: null
@@ -189,6 +223,7 @@ async function executeAudit(raw) {
             }
             const filename = `${sIdx + 1}-${vIdx + 1}-${safeName(scenario.id)}-${safeName(vp.id)}.png`;
             try {
+              if (outsideOrigin) throw Error('Скриншот чужого origin не сохраняется');
               await screenshotWithRedaction(page, { path: path.join(screenshots, filename), fullPage: false, timeout: 8000 });
               result.screenshot = filename;
               for (let index = observationStart; index < observations.length; index++) {
@@ -236,6 +271,7 @@ async function executeAudit(raw) {
   } finally {
     activeBrowser = null;
     if (browser) await browser.close().catch(() => {});
+    if (proxy) await proxy.close().catch(() => {});
   }
   report.durationMs = Date.now() - start;
   report.normalizedFindings = groupObservations(observations);
