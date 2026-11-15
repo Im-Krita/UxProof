@@ -40,6 +40,7 @@ flowchart LR
 ### `src-tauri/`
 
 - `run_audit(config)`: схема и ограничения конфигурации, UUID, каталог хранения, передача конфигурации в stdin процесса `node runner/cli.mjs`, JSON-ответ. Старые каталоги могут содержать ранее записанный `input.json`.
+- Debug использует runner из checkout; release выбирает runner из ресурсов пакета. Список файлов и каталогов зависимостей задан явно в `tauri.conf.json`.
 - `list_reports()`: чтение последних 30 отчётов.
 - `read_screenshot(runId,filename)`: PNG строго из `screenshots/` каталога run.
 - `export_html(runId)`: возврат локального пути к созданному HTML.

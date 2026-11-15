@@ -47,16 +47,16 @@ fn report_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+fn select_runner(dev: &Path, bundled: &Path, allow_dev: bool) -> Result<PathBuf, String> {
+    if allow_dev && dev.is_file() { return Ok(dev.to_path_buf()); }
+    if bundled.is_file() { return Ok(bundled.to_path_buf()); }
+    Err("Не найден runner/cli.mjs. Проверьте ресурсы сборки.".into())
+}
+
 fn runner_script(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runner/cli.mjs");
-    if dev.is_file() {
-        return Ok(dev);
-    }
     let bundled = app.path().resource_dir().map_err(|e| e.to_string())?.join("runner/cli.mjs");
-    if bundled.is_file() {
-        return Ok(bundled);
-    }
-    Err("Не найден runner/cli.mjs. Проверьте ресурсы сборки.".into())
+    select_runner(&dev, &bundled, cfg!(debug_assertions))
 }
 
 fn valid_token(input: &str) -> bool {
@@ -494,6 +494,22 @@ mod tests {
         let output = run_node(&script, br#"{"probe":"received"}"#).unwrap();
         assert_eq!(output, b"received");
         fs::remove_file(script).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn release_selects_bundled_runner_even_if_source_checkout_exists() {
+        let dir = std::env::temp_dir().join(format!("uxproof-runner-test-{}", Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let dev = dir.join("dev.mjs");
+        let bundled = dir.join("bundle.mjs");
+        fs::write(&dev, "dev").unwrap();
+        fs::write(&bundled, "bundle").unwrap();
+        assert_eq!(select_runner(&dev, &bundled, false).unwrap(), bundled);
+        assert_eq!(select_runner(&dev, &bundled, true).unwrap(), dev);
+        fs::remove_file(&bundled).unwrap();
+        assert!(select_runner(&dev, &bundled, false).is_err());
+        fs::remove_file(&dev).unwrap();
         fs::remove_dir(dir).unwrap();
     }
 }
