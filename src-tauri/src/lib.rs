@@ -1,17 +1,45 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 use std::{
-    fs,
+    fs::{self, File, OpenOptions},
     io::Read,
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
 };
 use tauri::Manager;
 use url::Url;
 use uuid::Uuid;
+
+struct AuditLock(AtomicBool);
+
+impl AuditLock {
+    const fn new() -> Self { Self(AtomicBool::new(false)) }
+
+    fn acquire(&self) -> Result<AuditGuard<'_>, String> {
+        self.0.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map(|_| AuditGuard(self))
+            .map_err(|_| "Уже выполняется другая проверка. Дождитесь её завершения.".into())
+    }
+}
+
+struct AuditGuard<'a>(&'a AuditLock);
+
+impl Drop for AuditGuard<'_> {
+    fn drop(&mut self) { self.0.0.store(false, Ordering::Release); }
+}
+
+static AUDIT_LOCK: AuditLock = AuditLock::new();
+
+fn lock_audit_file(root: &Path) -> Result<File, String> {
+    let file = OpenOptions::new().read(true).write(true).create(true).open(root.join(".audit.lock"))
+        .map_err(|e| format!("Не удалось открыть блокировку проверки: {e}"))?;
+    file.try_lock().map_err(|e| format!("Не удалось получить блокировку проверки: {e}"))?;
+    Ok(file)
+}
 
 fn report_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let root = app.path().app_data_dir().map_err(|e| e.to_string())?.join("runs");
@@ -252,11 +280,17 @@ fn reveal(path: &Path) -> Result<(), String> {
 #[tauri::command]
 async fn run_audit(app: tauri::AppHandle, config: Value) -> Result<Value, String> {
     validate(&config)?;
+    let guard = AUDIT_LOCK.acquire()?;
+    let root = report_root(&app)?;
+    let file_guard = lock_audit_file(&root)?;
     let id = Uuid::new_v4().to_string();
-    let dir = report_root(&app)?.join(&id);
+    let dir = root.join(&id);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let script = runner_script(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
+        // The worker owns the guard so cancellation of the IPC future cannot unlock a running audit.
+        let _guard = guard;
+        let _file_guard = file_guard;
         let input = dir.join("input.json");
         let mut payload = config;
         payload["runId"] = json!(id);
@@ -375,5 +409,74 @@ mod tests {
         assert!(!valid_token(".."));
         assert!(!valid_token("../secret.png"));
         assert!(valid_token("1-1-server-desktop.png"));
+    }
+
+    #[test]
+    fn audit_lock_rejects_parallel_work_and_releases_after_errors() {
+        let lock = AuditLock::new();
+        let first = lock.acquire().unwrap();
+        assert!(lock.acquire().is_err());
+        drop(first);
+        let result: Result<(), &str> = (|| {
+            let _guard = lock.acquire().unwrap();
+            Err("simulated error")
+        })();
+        assert!(result.is_err());
+        assert!(lock.acquire().is_ok());
+    }
+
+    #[test]
+    fn audit_lock_releases_during_unwind() {
+        let lock = AuditLock::new();
+        let result = std::panic::catch_unwind(|| {
+            let _guard = lock.acquire().unwrap();
+            panic!("simulated failure");
+        });
+        assert!(result.is_err());
+        assert!(lock.acquire().is_ok());
+    }
+
+    #[test]
+    fn audit_lock_blocks_another_thread_until_worker_finishes() {
+        let lock = AuditLock::new();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let worker_lock = &lock;
+            scope.spawn(move || {
+                let _guard = worker_lock.acquire().unwrap();
+                ready_tx.send(()).unwrap();
+                finish_rx.recv().unwrap();
+            });
+            ready_rx.recv().unwrap();
+            assert!(lock.acquire().is_err());
+            finish_tx.send(()).unwrap();
+        });
+        assert!(lock.acquire().is_ok());
+    }
+
+    #[test]
+    fn audit_file_lock_is_cross_process() {
+        const CHILD_DIR: &str = "UXPROOF_TEST_LOCK_DIR";
+        const CHILD_EXPECT: &str = "UXPROOF_TEST_LOCK_EXPECT";
+        if let Some(dir) = std::env::var_os(CHILD_DIR) {
+            let locked = lock_audit_file(Path::new(&dir)).is_ok();
+            assert_eq!(locked, std::env::var(CHILD_EXPECT).unwrap() == "available");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("uxproof-lock-test-{}", Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let held = lock_audit_file(&dir).unwrap();
+        let child = |expect| {
+            let output = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::audit_file_lock_is_cross_process"])
+                .env(CHILD_DIR, &dir).env(CHILD_EXPECT, expect).output().unwrap();
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed")
+        };
+        assert!(child("busy"));
+        drop(held);
+        assert!(child("available"));
+        fs::remove_file(dir.join(".audit.lock")).unwrap();
+        fs::remove_dir(dir).unwrap();
     }
 }
