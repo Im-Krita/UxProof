@@ -72,8 +72,9 @@ UI: клик "Запустить аудит"
       browser.newContext({ viewport })
       page.goto(baseUrl)
       for step in scenario.steps:
+        записать before/action
         выполнить действие
-        при ошибке: сохранить отдельный PNG шага, записать failed, остановить сценарий
+        записать after или при ошибке: сохранить отдельный PNG, записать error, остановить сценарий
       AxeBuilder(page).analyze()
       measure document scrollWidth vs viewport
       gather pageerror

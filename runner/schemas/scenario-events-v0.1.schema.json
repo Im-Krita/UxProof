@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uxproof.local/schemas/scenario-events-v0.1.schema.json",
+  "title": "UXProof scenario events v0.1",
+  "type": "object",
+  "required": ["runId", "scenarioEventsVersion", "scenarioEvents"],
+  "properties": {
+    "runId": { "type": "string", "pattern": "\\S" },
+    "scenarioEventsVersion": { "const": "0.1" },
+    "scenarioEvents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["eventId", "runId", "combinationId", "scenarioId", "viewportId", "stepId", "stepType", "phase", "at"],
+        "properties": {
+          "eventId": { "type": "string", "pattern": "\\S" }, "runId": { "type": "string", "pattern": "\\S" },
+          "combinationId": { "type": "string", "pattern": "\\S" }, "scenarioId": { "type": "string", "pattern": "\\S" },
+          "viewportId": { "type": "string", "pattern": "\\S" }, "stepId": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+          "stepType": { "type": "string", "pattern": "\\S" }, "phase": { "enum": ["before", "action", "after", "error"] },
+          "at": { "type": "string", "format": "date-time" },
+          "screenshot": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,160}\\.png$" }] }
+        },
+        "allOf": [{ "if": { "properties": { "phase": { "const": "error" } }, "required": ["phase"] },
+          "then": { "required": ["screenshot"] }, "else": { "not": { "required": ["screenshot"] } } }]
+      }
+    }
+  }
+}

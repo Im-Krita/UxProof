@@ -12,6 +12,7 @@ import { validateNormalizedReport } from './report-contract.mjs';
 import { screenshotWithRedaction } from './screenshot.mjs';
 import { startGuardProxy } from './guard-proxy.mjs';
 import { writeArtifactManifest } from './artifacts.mjs';
+import { stepEvent, validateScenarioEvents } from './events.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -68,7 +69,8 @@ async function executeAudit(raw) {
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
     summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas и видео; другой видимый текст может содержать личные данные.'],
-    normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' }
+    normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' },
+    scenarioEventsVersion: '0.1', scenarioEvents: []
   };
   const observations = [];
   let browser;
@@ -154,14 +156,20 @@ async function executeAudit(raw) {
               const step = scenario.steps[i];
               const stamp = Date.now();
               const name = step.name || `${step.type}${step.target ? `: ${step.target}` : ''}`;
+              const eventBase = { runId, combinationId: result.id, scenarioId: String(scenario.id || `index:${sIdx}`),
+                viewportId: String(vp.id || `index:${vIdx}`), stepId: String(i + 1), stepType: step.type };
+              report.scenarioEvents.push(stepEvent(eventBase, 'before'));
               try {
                 assertCurrentOrigin();
+                report.scenarioEvents.push(stepEvent(eventBase, 'action'));
                 await executeStep(page, step, config.baseUrl);
                 assertCurrentOrigin();
+                report.scenarioEvents.push(stepEvent(eventBase, 'after'));
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'passed', durationMs: Date.now() - stamp });
                 result.passedSteps++;
               } catch (error) {
                 const durationMs = Date.now() - stamp;
+                const failedAt = new Date().toISOString();
                 const message = String(error?.message || error).split('\n')[0].slice(0, 450);
                 let errorScreenshot = null;
                 let wroteErrorScreenshot = false;
@@ -187,6 +195,7 @@ async function executeAudit(raw) {
                   }
                 }
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs, error: message, screenshot: errorScreenshot });
+                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot }));
                 result.status = 'failed';
                 if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',
@@ -300,6 +309,7 @@ async function executeAudit(raw) {
   report.durationMs = Date.now() - start;
   report.normalizedFindings = groupObservations(observations);
   validateNormalizedReport(report);
+  validateScenarioEvents(report);
   report.summary = {
     totalRuns: report.results.length,
     passedRuns: report.results.filter(item => item.status === 'passed').length,
@@ -314,6 +324,7 @@ async function executeAudit(raw) {
   const screenshotNames = [
     ...report.results.flatMap(result => [result.screenshot, ...result.steps.map(step => step.screenshot)]),
     ...report.issues.map(issue => issue.screenshot),
+    ...report.scenarioEvents.map(event => event.screenshot),
     ...report.normalizedFindings.flatMap(finding => finding.observations.map(observation => observation.evidence?.screenshot))
   ].filter(name => typeof name === 'string' && name);
   try {

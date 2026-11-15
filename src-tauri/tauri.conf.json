@@ -25,6 +25,7 @@
       "../runner/audit.mjs": "runner/audit.mjs",
       "../runner/cli.mjs": "runner/cli.mjs",
       "../runner/comparison.mjs": "runner/comparison.mjs",
+      "../runner/events.mjs": "runner/events.mjs",
       "../runner/findings.mjs": "runner/findings.mjs",
       "../runner/guard-proxy.mjs": "runner/guard-proxy.mjs",
       "../runner/html.mjs": "runner/html.mjs",

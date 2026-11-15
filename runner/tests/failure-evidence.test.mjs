@@ -24,6 +24,10 @@ test('a failed step has its own screenshot instead of the final run screenshot',
     assert.equal(issue.screenshot, result.steps[0].screenshot);
     assert.equal(observation.evidence.screenshot, result.steps[0].screenshot);
     assert.notEqual(result.screenshot, result.steps[0].screenshot);
+    assert.equal(report.scenarioEventsVersion, '0.1');
+    assert.deepEqual(report.scenarioEvents.map(event => event.phase), ['before', 'action', 'error']);
+    assert.equal(report.scenarioEvents.at(-1).screenshot, result.steps[0].screenshot);
+    assert.equal(new Set(report.scenarioEvents.map(event => event.eventId)).size, 3);
     for (const filename of [result.screenshot, result.steps[0].screenshot]) assert.ok((await fs.stat(path.join(dir, 'screenshots', filename))).size > 100);
     assert.equal(report.artifactManifest, 'artifacts.json');
     const manifest = JSON.parse(await fs.readFile(path.join(dir, report.artifactManifest), 'utf8'));
@@ -76,6 +80,7 @@ test('a failed error screenshot is not replaced with a later screenshot', async 
     assert.equal(result.steps[0].screenshot, null);
     assert.equal(issue.screenshot, null);
     assert.equal(observation.evidence, undefined);
+    assert.equal(report.scenarioEvents.at(-1).screenshot, null);
     assert.ok(report.warnings.some(warning => warning.includes('Скриншот ошибки')));
   } finally {
     await new Promise(resolve => server.close(resolve));
