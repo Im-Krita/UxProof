@@ -22,6 +22,16 @@ test('проверяет ожидаемый текст и значение ша�
  await executeStep(page,{type:'expectText',target:'css:#status',value:'подключено'},'http://example.test');
  await assert.rejects(()=>executeStep(page,{type:'expectValue',target:'css:#v',value:'v2'},'http://example.test'));
 });
+test('ошибки проверок не включают ожидаемые или фактические значения',async()=>{
+ const page={locator:()=>({waitFor:async()=>{},textContent:async()=> 'actual-secret',inputValue:async()=> 'actual-secret'})};
+ for (const type of ['expectText','expectValue']) {
+  await assert.rejects(()=>executeStep(page,{type,target:'css:#status',value:'expected-secret'},'http://example.test'), error=>{
+   assert.ok(!error.message.includes('expected-secret'));
+   assert.ok(!error.message.includes('actual-secret'));
+   return true;
+  });
+ }
+});
 test('отвергает метадата-адрес и пустой ожидаемый текст',()=>{
  const metadata=cfg(); metadata.baseUrl='http://169.254.169.254/latest'; assert.throws(()=>validateConfig(metadata));
  const empty=cfg(); empty.scenarios[0].steps[0]={type:'expectText',target:'css:#status',value:' '}; assert.throws(()=>validateConfig(empty));

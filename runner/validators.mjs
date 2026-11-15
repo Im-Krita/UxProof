@@ -91,13 +91,13 @@ export async function executeStep(page, step, baseUrl, timeoutMs = 5500) {
       if (!value.trim()) throw Error('Не задан ожидаемый текст');
       await loc.waitFor({ state: 'visible', timeout: timeoutMs });
       const actual = (await loc.textContent()) || '';
-      if (!actual.includes(value)) throw Error(`Ожидали текст «${value}», получили «${actual.slice(0, 180)}»`);
+      if (!actual.includes(value)) throw Error('Текст элемента не соответствует ожидаемому');
       return;
     }
     case 'expectValue': {
       if (!value.trim()) throw Error('Не задано ожидаемое значение');
       const actual = await loc.inputValue({ timeout: timeoutMs });
-      if (actual !== value) throw Error(`Ожидали значение «${value}», получили «${actual}»`);
+      if (actual !== value) throw Error('Значение поля не соответствует ожидаемому');
       return;
     }
     case 'wait': return page.waitForTimeout(Math.min(2000, Math.max(0, Number(value) || 400)));

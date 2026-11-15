@@ -9,6 +9,7 @@ import { assertAuditableUrl, assertRequestAllowed, baseTargetsLoopback } from '.
 import { axeObservations, failedStepObservation, groupObservations } from './findings.mjs';
 import { comparisonKey } from './comparison.mjs';
 import { validateNormalizedReport } from './report-contract.mjs';
+import { screenshotWithRedaction } from './screenshot.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -65,7 +66,7 @@ async function executeAudit(raw) {
     version: 1, runId, comparisonKey: comparisonKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
-    summary: {}, results: [], issues: [], warnings: [],
+    summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas и видео; другой видимый текст может содержать личные данные.'],
     normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' }
   };
   const observations = [];
@@ -125,7 +126,7 @@ async function executeAudit(raw) {
             for (let i = 0; i < scenario.steps.length; i++) {
               const step = scenario.steps[i];
               const stamp = Date.now();
-              const name = step.name || `${step.type}: ${step.target || step.value || ''}`;
+              const name = step.name || `${step.type}${step.target ? `: ${step.target}` : ''}`;
               try {
                 await executeStep(page, step, config.baseUrl);
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'passed', durationMs: Date.now() - stamp });
@@ -188,7 +189,7 @@ async function executeAudit(raw) {
             }
             const filename = `${sIdx + 1}-${vIdx + 1}-${safeName(scenario.id)}-${safeName(vp.id)}.png`;
             try {
-              await page.screenshot({ path: path.join(screenshots, filename), fullPage: false, animations: 'disabled', timeout: 8000 });
+              await screenshotWithRedaction(page, { path: path.join(screenshots, filename), fullPage: false, timeout: 8000 });
               result.screenshot = filename;
               for (let index = observationStart; index < observations.length; index++) {
                 observations[index].evidence = { screenshot: filename };

@@ -39,7 +39,7 @@ flowchart LR
 
 ### `src-tauri/`
 
-- `run_audit(config)`: схема и ограничения конфигурации, UUID, каталог хранения, запись input.json, запуск `node runner/cli.mjs`, JSON-ответ.
+- `run_audit(config)`: схема и ограничения конфигурации, UUID, каталог хранения, передача конфигурации в stdin процесса `node runner/cli.mjs`, JSON-ответ. Старые каталоги могут содержать ранее записанный `input.json`.
 - `list_reports()`: чтение последних 30 отчётов.
 - `read_screenshot(runId,filename)`: PNG строго из `screenshots/` каталога run.
 - `export_html(runId)`: возврат локального пути к созданному HTML.
@@ -75,7 +75,7 @@ UI: клик "Запустить аудит"
       AxeBuilder(page).analyze()
       measure document scrollWidth vs viewport
       gather pageerror
-      page.screenshot(screenshots/....png)
+      page.screenshot(screenshots/....png) с маской полей, iframe, canvas и видео
       optionally reviewScreenshot() (max 1 per scenario, max 3 calls)
       context.close()
  -> summary, report.json, report.html
@@ -83,7 +83,7 @@ UI: клик "Запустить аудит"
  -> history available on disk
 ```
 
-**Не сохраняем:** произвольные cookies, HAR, видеозаписи, полные DOM snapshots — это отложено во избежание лишней сложности и риска утечки данных.
+**Не сохраняем:** произвольные cookies, HAR, видеозаписи, полные DOM snapshots — это отложено во избежание лишней сложности и риска утечки данных. Маска снимка не распознаёт личные данные в обычном видимом тексте, именах шагов или сообщениях сайта; это остаётся ограничением приватности.
 
 ## 5. Доверенная классификация
 
