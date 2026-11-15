@@ -1,0 +1,12 @@
+node_modules/
+runner/node_modules/
+runner/.env
+.env
+.env.*
+!.env.example
+dist/
+src-tauri/target/
+.uxproof-data/
+*.log
+*.tsbuildinfo
+.DS_Store

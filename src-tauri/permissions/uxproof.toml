@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-uxproof-commands"
+description = "Validated UXProof audit commands. The webview cannot access the filesystem or shell directly."
+commands.allow = ["run_audit", "list_reports", "read_screenshot", "export_html"]

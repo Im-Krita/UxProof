@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Relay — demo QA</title>
+<script>
+  (function () {
+    var path = location.pathname.replace(/\/+$/, '') || '/';
+    document.documentElement.dataset.variant = path === '/fixed' ? 'fixed' : 'buggy';
+  })();
+</script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #f5f7fa; color: #242e3c; }
+  .shell { max-width: 940px; margin: 0 auto; padding: 50px 24px; }
+  .hero { background: #182530; color: #fff; padding: 30px; border-radius: 18px; }
+  .eyebrow { font-size: 13px; color: #bfd9c9; }
+  .hero h1 { margin: 9px 0; font-size: 30px; }
+  nav { display: flex; gap: 10px; margin: 26px 0; flex-wrap: wrap; }
+  button, select { font: inherit; padding: 11px 15px; border: 1px solid #cdd6df; background: #fff; border-radius: 9px; cursor: pointer; }
+  button.primary { background: #284e40; color: #fff; border-color: #284e40; }
+  .panel { background: white; border: 1px solid #e3e8ed; border-radius: 16px; padding: 26px; min-height: 260px; }
+  h2 { margin: 0 0 16px; }
+  label { display: block; font-weight: 600; margin: 12px 0 10px; }
+  select { width: 100%; max-width: 360px; }
+  p { color: #3e4c5c; }
+  .row { margin-top: 22px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .sub { color: #d5e4da; font-size: 13px; }
+  .bad-contrast { color: #d8dadd; background: white; }
+  html[data-variant="fixed"] .bad-contrast { color: #1d2b24; }
+  .hint { font-size: 12px; margin-top: 20px; }
+  .back { margin-top: 20px; }
+  .overflow-probe { width: 1800px; height: 12px; background: #eadfdf; }
+  #save-status { margin-top: 12px; color: #1f4d34; font-weight: 700; }
+  @media (max-width: 520px) {
+    .shell { padding: 18px 12px; }
+    .hero { padding: 22px; }
+    .hero h1 { font-size: 24px; }
+    html:not([data-variant="fixed"]) .back { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="hero">
+    <div class="eyebrow">DEMO APPLICATION / UXPROOF</div>
+    <h1>Relay workspace</h1>
+    <div class="sub">Демонстрационная панель подключений</div>
+  </div>
+  <nav>
+    <button id="home-nav" type="button">Главная</button>
+    <button id="servers-nav" type="button">Серверы</button>
+    <button id="settings-nav" type="button">Настройки</button>
+  </nav>
+  <main class="panel" id="content"></main>
+  <p class="hint" id="demo-hint">Демо с тремя дефектами: нет подтверждения сохранения, на узком экране скрыта «На главную», открытие настроек даёт исключение JavaScript и горизонтальный вылет.</p>
+</div>
+<script>
+const fixed = document.documentElement.dataset.variant === 'fixed';
+const hint = document.querySelector('#demo-hint');
+if (hint && fixed) hint.textContent = 'Исправленный вариант: есть подтверждение сохранения, кнопка возврата видна, нет исключения и горизонтального вылета.';
+const content = document.querySelector('#content');
+let selected = 'us-east';
+function render(page) {
+  if (page === 'servers') {
+    content.innerHTML = '<h2>Серверы</h2><label for="server-select">Выберите сервер</label><select id="server-select"><option value="us-east">US East</option><option value="eu-west">EU West</option></select><div class="row"><button class="primary" id="connect" type="button">Подключиться</button><span id="connection-state">Не подключено</span></div>';
+  } else if (page === 'settings') {
+    const probe = fixed ? '' : '<div class="overflow-probe" id="overflow-probe"></div>';
+    content.innerHTML = '<h2>Настройки</h2><label for="notifications">Уведомления</label><input id="notifications" type="checkbox">' + probe + '<div class="row"><button class="primary" id="save" type="button">Сохранить</button></div><button class="back" id="back-home" type="button">На главную</button><p class="bad-contrast">Настройки применяются немедленно.</p>';
+  } else {
+    content.innerHTML = '<section id="dashboard"><h2>Главная</h2><p>Добро пожаловать в панель управления Relay.</p><button id="choose-server" type="button">Выбрать сервер</button></section>';
+  }
+  if (page === 'servers') {
+    document.querySelector('#server-select').value = selected;
+    document.querySelector('#server-select').addEventListener('change', event => { selected = event.target.value; });
+    document.querySelector('#connect').addEventListener('click', () => {
+      document.querySelector('#connection-state').textContent = 'Подключено';
+    });
+  }
+  if (page === 'settings') {
+    document.querySelector('#save').addEventListener('click', () => {
+      if (!fixed) return;
+      let status = document.querySelector('[role="status"]');
+      if (!status) {
+        status = document.createElement('div');
+        status.id = 'save-status';
+        status.setAttribute('role', 'status');
+        status.textContent = 'Настройки сохранены';
+        document.querySelector('#save').after(status);
+      }
+    });
+    document.querySelector('#back-home').addEventListener('click', () => render('home'));
+    if (!fixed) setTimeout(() => { throw new Error('Relay demo: необработанное исключение при открытии настроек'); }, 30);
+  }
+  if (page === 'home') document.querySelector('#choose-server').addEventListener('click', () => render('servers'));
+}
+for (const name of ['home', 'servers', 'settings']) document.querySelector('#' + name + '-nav').addEventListener('click', () => render(name));
+render('home');
+</script>
+</body>
+</html>

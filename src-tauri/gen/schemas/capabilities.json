@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Only core window capabilities; file I/O and process invocation stay inside validated Rust commands.","local":true,"windows":["main"],"permissions":["core:default","allow-uxproof-commands"]}}

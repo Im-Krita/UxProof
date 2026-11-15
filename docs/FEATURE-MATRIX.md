@@ -1,0 +1,33 @@
+# Матрица функциональности UXProof
+
+Статусы сняты 15 ноября 2026 после прогона на Windows. «Implemented & Tested» означает, что поведение наблюдалось командой или в браузере, а не только по наличию кода.
+
+| ID | Название | Описание | UI | Backend | Реализация | Статус | Автотест | Ручная проверка | Баги | Ограничения | Дальше |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| FR-001 | Проект | Имя и URL | Да | Да | Поля в редакторе, контракт `AuditConfig` | Implemented & Tested | Косвенно через smoke | Браузер: имя и `http://127.0.0.1:4180` отображаются | — | — | — |
+| FR-002 | Валидация URL | Только `http(s)`, без логина, без `file:` и `javascript:` | Да | Да | UI, Node, Rust | Implemented & Tested | validators, policy, `cargo test`, `test:edge` | `file:///C:/Windows/win.ini` остановлен в UI | BUG-001, BUG-011 | Явный локальный адрес проекта разрешён | Сетевой allowlist доменов |
+| FR-003 | Сценарии | До 10, создание и удаление | Да | Да | Список и редактор | Implemented & Tested | Валидатор границ | В UI видны 3 сценария и кнопка добавления | — | Удаление последнего запрещено | — |
+| FR-004 | Шаги | До 30, типы действий, порядок | Да | Да | Редактор, вверх/вниз | Implemented & Tested | Юнит-тесты типов | В браузере шаг 2 поднят и возвращён | BUG-008 | Нет drag-and-drop | Запись кликов, P1 |
+| FR-005 | Селекторы | role, label, text, css, testid, placeholder | Да | Да | `locatorFor` | Implemented & Tested | smoke использует role и css | Те же сценарии прошли в UI | — | Не покрыт отдельным тестом каждый префикс | — |
+| FR-006 | Экраны | Desktop, tablet, mobile, минимум один | Да | Да | Три пресета, `aria-pressed` | Implemented & Tested | smoke 3×3 | Плитки в UI нажаты | — | Свой размер только через JSON | — |
+| FR-007 | Playwright | Реальный Chromium | Нет отдельной кнопки | Да | `runner/audit.mjs` | Implemented & Tested | smoke, fix, edge, UI-прогон | 9 комбинаций, скриншоты PNG | — | Нужен установленный Chromium | — |
+| FR-008 | Изоляция | Новый context на пару сценарий×экран | Нет | Да | `browser.newContext` | Implemented & Tested | Код пути покрыт успешным прогоном | Состояние подключения не переносится: каждый экран начинает с главной | — | Серверное состояние сайта не сбрасывается | Фикстуры, P1 |
+| FR-009 | Дефект шага | Причина, номер, сценарий, воспроизведение | Да | Да | `issues[]` и диалог | Implemented & Tested | smoke проверяет упавшие шаги | Диалог показал путь «Открыть настройки → … → Увидеть подтверждение» и PNG 1440px | BUG-003 | Снимок делается в конце комбинации, не на каждом шаге | Снимки шагов, P1 |
+| FR-010 | axe-core | WCAG-теги, rule id, узлы | Да | Да | `@axe-core/playwright` | Implemented & Tested | smoke ждёт `color-contrast` | В UI виден `.bad-contrast` | — | axe не доказывает полное WCAG | — |
+| FR-011 | JS-ошибки | `pageerror` | Да | Да | Слушатель страницы | Implemented & Tested | smoke и fix | Текст «необработанное исключение при открытии настроек» | — | Ловит необработанные исключения, не `console.error` | — |
+| FR-012 | Горизонтальный вылет | `scrollWidth` против окна | Да | Да | `page.evaluate` | Implemented & Tested | smoke и fix | «Контент 2101px шире окна 1440px» | — | Порог +3px | — |
+| FR-013 | Скриншоты | PNG и просмотр | Да | Да | Файл и `/api/image` или data URL | Implemented & Tested | smoke проверяет размер файлов | В диалоге `naturalWidth=1440` | BUG-003, BUG-004 | — | — |
+| FR-014 | ИИ | OpenAI или Ollama, необязательно | Да | Да | `runner/ai.mjs` | Partially Implemented | Юнит-тесты: нет ключа, HTTP 401 без утечки ключа, чужой Ollama, битый JSON | Живой модели не было | BUG-013 | Платный API не вызывался | Проверка с локальной vision-моделью |
+| FR-015 | Доверие | `confirmed` отдельно от `recommendation` | Да | Да | `evidenceType`, фильтры | Implemented & Tested | Юнит-тест и smoke: рекомендаций 0 | Фильтры «Дефекты» и «ИИ» есть в результатах | — | — | — |
+| FR-016 | История | Последние 30 JSON | Да | Да | Диск `.uxproof-data/runs` и команда Rust | Implemented & Tested | Прогоны пишут `report.json` | UI показал 6 записей, включая 5/9 и 9/9 | — | В режиме Tauri каталог другой, чтение истории из окна не нажималось | — |
+| FR-017 | HTML | Экранирование и ссылки на PNG | Да | Да | `renderHtml` | Implemented & Tested | Юнит-тест XSS и `../` | UI: «HTML-отчёт скачивается браузером». Файл 9595 байт, 9 PNG, тега `script` нет | BUG-004 | — | — |
+| FR-018 | JSON | Проект и отчёт | Да | Да | Скачивание и `report.json` | Implemented & Tested | smoke пишет JSON | Кнопка JSON есть. Повторный импорт файла в UI не выполнялся | BUG-011 | — | — |
+| FR-019 | Tauri IPC | Rust проверяет ввод и запускает Node | Да | Да | `run_audit` и capability | Partially Implemented | `cargo test` валидации | Окно открылось, редактор и URL видны. Кнопка запуска в окне не нажата | BUG-006, BUG-014 | Нужны Node и Chromium на машине | Дожать один IPC-прогон |
+| FR-020 | Автономный установщик | Свой Node и Chromium | Нет | Нет | Не делался | Missing | — | — | BUG-012 | P2 | Sidecar |
+| FR-021 | ИИ-агент навигации | План по тексту | Нет | Нет | Вне MVP | Missing | — | — | — | P1/P2 | — |
+| FR-022 | Excel | XLSX | Нет | Нет | Вне MVP | Missing | — | — | — | P1 | — |
+| FR-023 | CI | GitHub Actions | Нет | Нет | Вне MVP | Missing | — | — | — | P1 | — |
+| FR-024 | MCP | Внешние инструменты | Нет | Нет | Вне MVP | Missing | — | — | — | P1 | — |
+| DEMO-A | Нет подтверждения сохранения | `role=status` отсутствует | Демо | Демо | `demo/index.html` | Implemented & Tested | smoke: падение на всех 3 экранах; `/fixed`: 4/4 | UI показал тот же шаг | — | — | — |
+| DEMO-B | Скрытая «На главную» | На ширине до 520px | Демо | Демо | CSS `.back` | Implemented & Tested | smoke: Mobile 1/3, Desktop и Tablet проходят; `/fixed`: Mobile 3/3 | UI: «Вернуться на главную» только на Mobile | — | — | — |
+| DEMO-C | Исключение и вылет | Настройки бросают ошибку и рисуют блок 1800px | Демо | Демо | Вариант `/` и `/fixed` | Implemented & Tested | smoke: javascript + overflow; `/fixed`: оба исчезли | Текст исключения виден в UI | — | На Desktop/Tablet после успешного возврата вылет уже не измеряется: страница сменилась | — |

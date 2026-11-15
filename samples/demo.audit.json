@@ -1,0 +1,29 @@
+{
+  "project": "Relay — демонстрационный аудит",
+  "baseUrl": "http://127.0.0.1:4180",
+  "options": { "enableAI": false, "aiProvider": "openai" },
+  "viewports": [
+    { "id": "desktop", "label": "Desktop", "width": 1440, "height": 900 },
+    { "id": "tablet", "label": "Tablet", "width": 768, "height": 1024 },
+    { "id": "mobile", "label": "Mobile", "width": 390, "height": 844 }
+  ],
+  "scenarios": [
+    { "id": "server", "title": "Выбор и подключение сервера", "steps": [
+      { "type": "click", "name": "Открыть список серверов", "target": "role:button|Серверы" },
+      { "type": "select", "name": "Выбрать EU West", "target": "css:#server-select", "value": "eu-west" },
+      { "type": "click", "name": "Подключиться", "target": "role:button|Подключиться" },
+      { "type": "expectText", "name": "Убедиться в подключении", "target": "css:#connection-state", "value": "Подключено" }
+    ]},
+    { "id": "settings", "title": "Сохранение настроек", "steps": [
+      { "type": "click", "name": "Открыть настройки", "target": "role:button|Настройки" },
+      { "type": "check", "name": "Включить уведомления", "target": "css:#notifications" },
+      { "type": "click", "name": "Сохранить изменения", "target": "role:button|Сохранить" },
+      { "type": "expectVisible", "name": "Увидеть подтверждение сохранения", "target": "css:[role=\"status\"]" }
+    ]},
+    { "id": "navigation", "title": "Возврат на главную", "steps": [
+      { "type": "click", "name": "Открыть настройки", "target": "role:button|Настройки" },
+      { "type": "click", "name": "Вернуться на главную", "target": "role:button|На главную" },
+      { "type": "expectVisible", "name": "Главный экран появился", "target": "css:#dashboard" }
+    ]}
+  ]
+}
