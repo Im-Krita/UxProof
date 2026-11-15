@@ -1,4 +1,11 @@
-// Exact matches are provisional; absence is never interpreted as a confirmed fix.
+export function pageScope(value) {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? `${url.origin}${url.pathname}` : null;
+  } catch { return null; }
+}
+
+// Exact matches are provisional; absence alone is never interpreted as a confirmed fix.
 export function compareFindings(before, after, options = {}) {
   const valid = report => report && report.status === 'completed' &&
     ['0.1', '0.2'].includes(report.normalizedSchemaVersion) &&
@@ -49,46 +56,91 @@ export function compareFindings(before, after, options = {}) {
       return { findingId: finding.findingId, afterFindingId, status: 'still-present' };
     });
     findings.push(...newIds.filter(id => !matched.has(id)).map(findingId => ({ findingId, status: 'unverified' })));
-    return { comparable: true, mappedPaths: true, findings };
+    return markRecheckedSteps(before, after, { comparable: true, mappedPaths: true, findings });
   }
   const oldSet = new Set(oldIds), newSet = new Set(newIds);
-  return { comparable: true, findings: [
+  return markRecheckedSteps(before, after, { comparable: true, findings: [
     ...oldIds.map(findingId => ({ findingId, status: newSet.has(findingId) ? 'still-present' : 'unverified' })),
     ...newIds.filter(id => !oldSet.has(id)).map(findingId => ({ findingId, status: 'unverified' }))
-  ] };
+  ] });
 }
 
-// A passed step is evidence about that execution, not proof that a defect is fixed.
-export function recheckedSteps(before, after, finding, options = {}) {
-  if (!compareFindings(before, after, options).comparable || before.scenarioEventsVersion !== '0.1' ||
+function stepEvidence(before, after, finding, mappedPaths) {
+  if (before.scenarioEventsVersion !== '0.1' ||
       after.scenarioEventsVersion !== '0.1' || !Array.isArray(before.scenarioEvents) ||
-      !Array.isArray(after.scenarioEvents) || !Array.isArray(after.results) ||
+      !Array.isArray(after.scenarioEvents) || !Array.isArray(before.results) || !Array.isArray(after.results) ||
       !finding || !before.normalizedFindings.includes(finding) ||
-      !finding.ruleId?.startsWith('playwright:step:') || !Array.isArray(finding.observations) || !finding.observations.length) return null;
+      typeof finding.ruleId !== 'string' || !finding.ruleId.startsWith('playwright:step:') ||
+      !Array.isArray(finding.anchor) || finding.anchor.length !== 4 || !pageScope(finding.anchor[0]) ||
+      finding.anchor[0] !== pageScope(finding.anchor[0]) || !/^definition:[a-f0-9]{64}$/.test(finding.anchor[2]) ||
+      !Array.isArray(finding.observations) || !finding.observations.length) return null;
+  for (const report of [before, after]) {
+    const ids = report.scenarioEvents.map(event => event?.eventId);
+    if (ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) return null;
+  }
   const type = finding.ruleId.slice('playwright:step:'.length);
   const unique = new Set();
-  let passed = 0;
+  let passed = 0, samePagePassed = 0;
+  const targetScope = mappedPaths && finding.anchor[0] === pageScope(before.baseUrl) ? pageScope(after.baseUrl) : mappedPaths ? null : finding.anchor[0];
+  const inspect = (report, observation, status) => {
+    const events = report.scenarioEvents.filter(event => event?.scenarioId === observation.scenarioId &&
+      event.viewportId === observation.viewportId && event.stepId === observation.stepId);
+    const sequence = events.map(event => event.phase).join('/');
+    if (status === 'passed' ? sequence !== 'before/action/after' : !['before/action/error', 'before/error'].includes(sequence)) return null;
+    if (!events.length || events.some(event => event.runId !== report.runId || event.stepType !== type ||
+        typeof event.eventId !== 'string' || !event.eventId || typeof event.at !== 'string' || !Number.isFinite(Date.parse(event.at)) ||
+        typeof event.combinationId !== 'string' || !event.combinationId || event.combinationId !== events[0].combinationId) ||
+        new Set(events.map(event => event.eventId)).size !== events.length) return null;
+    const results = report.results.filter(result => result?.id === events[0].combinationId);
+    const steps = results.length === 1 && Array.isArray(results[0].steps) ? results[0].steps.filter(step => String(step.index) === observation.stepId) : [];
+    if (steps.length !== 1 || steps[0].type !== type || steps[0].status !== status) return null;
+    if (status === 'failed' && events.at(-1).screenshot !== (steps[0].screenshot ?? null)) return null;
+    return events.at(-1);
+  };
   for (const observation of finding.observations) {
     const { scenarioId, viewportId, stepId } = observation || {};
     if (observation?.runId !== before.runId || observation.source !== 'playwright' ||
+        observation.ruleId !== finding.ruleId || observation.classification !== 'technical-fact' || observation.status !== 'confirmed' ||
+        JSON.stringify(observation.anchor) !== JSON.stringify(finding.anchor) ||
         typeof scenarioId !== 'string' || !scenarioId || typeof viewportId !== 'string' || !viewportId ||
-        typeof stepId !== 'string' || !/^[1-9]\d*$/.test(stepId)) return null;
+        typeof stepId !== 'string' || !/^[1-9]\d*$/.test(stepId) || finding.anchor[1] !== `scenario:${scenarioId}` ||
+        finding.anchor[3] !== `step:${stepId}`) return null;
     const key = JSON.stringify([scenarioId, viewportId, stepId]);
     if (unique.has(key)) return null;
     unique.add(key);
-    const relevant = (report, phase) => report.scenarioEvents.filter(event => event?.runId === report.runId &&
-      event.scenarioId === scenarioId && event.viewportId === viewportId && event.stepId === stepId &&
-      event.stepType === type && event.phase === phase);
-    if (relevant(before, 'error').length !== 1) return null;
-    const events = after.scenarioEvents.filter(event => event?.runId === after.runId && event.scenarioId === scenarioId &&
-      event.viewportId === viewportId && event.stepId === stepId && event.stepType === type);
-    const phases = events.map(event => event.phase).join('/');
-    if (phases !== 'before/action/after' || events.some(event => !event.combinationId || event.combinationId !== events[0].combinationId)) continue;
-    const results = after.results.filter(result => result?.id === events[0].combinationId);
-    const steps = results.length === 1 && Array.isArray(results[0].steps) ? results[0].steps.filter(step => String(step.index) === stepId) : [];
-    if (steps.length === 1 && steps[0].type === type && steps[0].status === 'passed') passed++;
+    const oldEvent = inspect(before, observation, 'failed');
+    if (!oldEvent) return null;
+    const newEvent = inspect(after, observation, 'passed');
+    if (!newEvent) continue;
+    passed++;
+    if (targetScope && oldEvent.pageScope === finding.anchor[0] && newEvent.pageScope === targetScope) samePagePassed++;
   }
-  return { passed, total: unique.size };
+  return { passed, total: unique.size, samePagePassed, targetScope };
+}
+
+function markRecheckedSteps(before, after, comparison) {
+  for (const item of comparison.findings) {
+    if (item.status !== 'unverified') continue;
+    const finding = before.normalizedFindings.find(entry => entry.findingId === item.findingId);
+    const evidence = stepEvidence(before, after, finding, Boolean(comparison.mappedPaths));
+    if (!evidence || !evidence.total || evidence.samePagePassed !== evidence.total) continue;
+    const targetAnchor = [evidence.targetScope, ...finding.anchor.slice(1)];
+    const scenarioId = finding.observations[0].scenarioId, stepId = finding.observations[0].stepId;
+    if (after.scenarioEvents.some(event => event?.phase === 'error' && event.scenarioId === scenarioId &&
+        event.stepId === stepId && event.stepType === finding.ruleId.slice('playwright:step:'.length))) continue;
+    if (after.normalizedFindings.some(entry => entry.findingId === finding.findingId ||
+        (entry.ruleId === finding.ruleId && JSON.stringify(entry.anchor) === JSON.stringify(targetAnchor)))) continue;
+    item.status = 'resolved';
+  }
+  return comparison;
+}
+
+// A passed execution is counted even for historical reports without page-scope evidence.
+export function recheckedSteps(before, after, finding, options = {}) {
+  const comparison = compareFindings(before, after, options);
+  if (!comparison.comparable) return null;
+  const evidence = stepEvidence(before, after, finding, Boolean(comparison.mappedPaths));
+  return evidence ? { passed: evidence.passed, total: evidence.total } : null;
 }
 
 // Validate only the fields needed to render the extension; unknown rule IDs remain visible.

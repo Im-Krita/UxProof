@@ -17,6 +17,7 @@ import { collectDomSummary } from './dom-summary.mjs';
 import { collectElementGeometry, sameElementGeometry } from './element-geometry.mjs';
 import { viewportOverflow, enabledRule } from './rules.mjs';
 import { collectDuplicateHeadings } from './copy-headings.mjs';
+import { pageScope } from './matching.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -185,7 +186,8 @@ async function executeAudit(raw) {
                 report.scenarioEvents.push(stepEvent(eventBase, 'action'));
                 await executeStep(page, step, config.baseUrl);
                 assertCurrentOrigin();
-                report.scenarioEvents.push(stepEvent(eventBase, 'after'));
+                const scope = pageScope(page.url());
+                report.scenarioEvents.push(stepEvent(eventBase, 'after', scope ? { pageScope: scope } : {}));
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'passed', durationMs: Date.now() - stamp });
                 result.passedSteps++;
               } catch (error) {
@@ -243,7 +245,8 @@ async function executeAudit(raw) {
                   }
                 }
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs, error: message, screenshot: errorScreenshot });
-                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot, domSummary, elementGeometry }));
+                const scope = outsideOrigin ? null : pageScope(page.url());
+                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot, domSummary, elementGeometry, ...(scope ? { pageScope: scope } : {}) }));
                 result.status = 'failed';
                 if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',
