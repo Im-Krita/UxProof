@@ -7,6 +7,7 @@ import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
 import { assertAuditableUrl, assertRequestAllowed, baseTargetsLoopback } from './policy.mjs';
 import { axeObservations, groupObservations } from './findings.mjs';
+import { comparisonKey } from './comparison.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -60,7 +61,7 @@ async function executeAudit(raw) {
   const start = Date.now();
   const deadline = start + maxDurationMs();
   const report = {
-    version: 1, runId, project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
+    version: 1, runId, comparisonKey: comparisonKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
     summary: {}, results: [], issues: [], warnings: [],
