@@ -113,7 +113,9 @@ export default function App() {
        for(const step of scenario.steps){ if(!step || !STEP_TYPES.includes(step.type)) throw Error(`Неизвестный шаг: ${step?.type ?? ''}`); }
      }
      const aiProvider: 'openai' | 'ollama' = value.options?.aiProvider==='ollama' ? 'ollama' : 'openai';
-     const normalized: AuditConfig={...value,options:{enableAI:Boolean(value.options?.enableAI),aiProvider}};
+     const disabledRules=value.options?.disabledRules;
+     if(disabledRules!==undefined&&(!Array.isArray(disabledRules)||disabledRules.length>100||disabledRules.some(id=>typeof id!=='string'||!id))) throw Error('Некорректный список отключённых правил');
+     const normalized: AuditConfig={...value,options:{enableAI:Boolean(value.options?.enableAI),aiProvider,...(disabledRules?{disabledRules}: {})}};
      setConfig(normalized);setActiveScenarioId(value.scenarios[0].id);setPanel('scenarios');setNotice(`Проект «${value.project}» импортирован`);
    }catch(e){setError(`Ошибка импорта: ${String(e instanceof Error?e.message:e)}`);}
    event.target.value='';

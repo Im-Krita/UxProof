@@ -28,6 +28,8 @@
       "../runner/dom-summary.mjs": "runner/dom-summary.mjs",
       "../runner/element-geometry.mjs": "runner/element-geometry.mjs",
       "../runner/events.mjs": "runner/events.mjs",
+      "../runner/rules.mjs": "runner/rules.mjs",
+      "../runner/rules/registry-v0.1.json": "runner/rules/registry-v0.1.json",
       "../runner/findings.mjs": "runner/findings.mjs",
       "../runner/guard-proxy.mjs": "runner/guard-proxy.mjs",
       "../runner/html.mjs": "runner/html.mjs",

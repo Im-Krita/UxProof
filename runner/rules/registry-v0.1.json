@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "0.1",
+  "rules": [
+    {
+      "ruleId": "layout:viewport-overflow",
+      "version": "1.0.0",
+      "title": "Горизонтальная прокрутка страницы",
+      "category": "layout",
+      "scope": "viewport",
+      "requiredEvidence": ["documentScrollWidth", "viewportWidth"],
+      "trigger": { "type": "viewport-overflow", "toleranceCssPx": 3 },
+      "exclusions": ["unavailable-measurement"],
+      "classification": "technical-fact",
+      "remediation": "Проверить элементы, выходящие за ширину окна, и оправданность горизонтальной прокрутки.",
+      "fixtures": ["viewport-overflow", "viewport-fits"],
+      "status": "enabled"
+    }
+  ]
+}

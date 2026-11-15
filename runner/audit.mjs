@@ -15,6 +15,7 @@ import { writeArtifactManifest } from './artifacts.mjs';
 import { stepEvent, validateScenarioEvents } from './events.mjs';
 import { collectDomSummary } from './dom-summary.mjs';
 import { collectElementGeometry, sameElementGeometry } from './element-geometry.mjs';
+import { viewportOverflow } from './rules.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -69,7 +70,7 @@ async function executeAudit(raw) {
   const report = {
     version: 1, runId, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
-    options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
+    options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai', ...(config.options?.disabledRules ? { disabledRules: config.options.disabledRules } : {}) },
     summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas и видео; другой видимый текст может содержать личные данные.'],
     normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' },
     scenarioEventsVersion: '0.1', scenarioEvents: []
@@ -265,11 +266,11 @@ async function executeAudit(raw) {
               report.warnings.push(`axe ${scenario.title}/${viewportLabel}: ${String(error.message || error).slice(0, 160)}`);
             }
             try {
-              const overflow = await page.evaluate(() => ({ actual: document.documentElement.scrollWidth, expected: window.innerWidth }));
-              if (overflow.actual > overflow.expected + 3) {
+              const overflow = viewportOverflow(await page.evaluate(() => ({ actual: document.documentElement.scrollWidth, expected: window.innerWidth })), config.options?.disabledRules);
+              if (overflow) {
                 report.issues.push({
                   id: `LAYOUT-${report.issues.length + 1}`, kind: 'overflow', status: 'confirmed', severity: 'medium',
-                  title: 'Горизонтальная прокрутка страницы', description: `Контент ${overflow.actual}px шире окна ${overflow.expected}px`,
+                  ruleId: overflow.ruleId, title: overflow.title, description: overflow.description,
                   scenario: scenario.title, viewport: viewportLabel, screenshot: null
                 });
               }

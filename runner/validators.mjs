@@ -1,4 +1,5 @@
 import { assertBaseUrlShape, decideRequest } from './policy.mjs';
+import { validateDisabledRules } from './rules.mjs';
 
 export const STEP_TYPES = new Set(['click','fill','select','check','navigate','expectVisible','expectHidden','expectText','expectValue','wait']);
 
@@ -13,6 +14,7 @@ const fail = message => { throw new InputError(message); };
 
 export function validateConfig(config) {
   if (!config || typeof config !== 'object') fail('Не задана конфигурация');
+  try { validateDisabledRules(config.options?.disabledRules); } catch { fail('Некорректный список отключённых правил'); }
   const parsed = (() => { try { return assertBaseUrlShape(config.baseUrl); } catch (error) { fail(error.message); } })();
   if (typeof config.project === 'string' && config.project.length > 200) fail('Слишком длинное название проекта');
   if (!Array.isArray(config.scenarios) || config.scenarios.length < 1 || config.scenarios.length > 10) fail('Нужно от 1 до 10 сценариев');
