@@ -8,6 +8,7 @@ import { renderHtml } from './html.mjs';
 import { assertAuditableUrl, assertRequestAllowed, baseTargetsLoopback } from './policy.mjs';
 import { axeObservations, groupObservations } from './findings.mjs';
 import { comparisonKey } from './comparison.mjs';
+import { validateNormalizedReport } from './report-contract.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -65,7 +66,7 @@ async function executeAudit(raw) {
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
     summary: {}, results: [], issues: [], warnings: [],
-    normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe'], note: 'Only axe nodes with explicit selectors are included.' }
+    normalizedSchemaVersion: '0.1', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe'], note: 'Only axe nodes with explicit selectors are included.' }
   };
   const observations = [];
   let browser;
@@ -234,6 +235,7 @@ async function executeAudit(raw) {
   }
   report.durationMs = Date.now() - start;
   report.normalizedFindings = groupObservations(observations);
+  validateNormalizedReport(report);
   report.summary = {
     totalRuns: report.results.length,
     passedRuns: report.results.filter(item => item.status === 'passed').length,
