@@ -160,19 +160,38 @@ async function executeAudit(raw) {
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'passed', durationMs: Date.now() - stamp });
                 result.passedSteps++;
               } catch (error) {
+                const durationMs = Date.now() - stamp;
                 const message = String(error?.message || error).split('\n')[0].slice(0, 450);
+                let errorScreenshot = null;
+                let wroteErrorScreenshot = false;
+                const errorFilename = `error-${sIdx + 1}-${vIdx + 1}-${i + 1}.png`;
+                if (!outsideOrigin) {
+                  try {
+                    assertCurrentOrigin();
+                    await screenshotWithRedaction(page, { path: path.join(screenshots, errorFilename), fullPage: false, timeout: 8000 });
+                    wroteErrorScreenshot = true;
+                    assertCurrentOrigin();
+                    errorScreenshot = errorFilename;
+                  } catch (captureError) {
+                    if (wroteErrorScreenshot && outsideOrigin) await fs.unlink(path.join(screenshots, errorFilename)).catch(() => {});
+                    if (!outsideOrigin) report.warnings.push(`Скриншот ошибки ${scenario.title}/${viewportLabel}: ${String(captureError.message || captureError).slice(0, 140)}`);
+                  }
+                }
                 if (!outsideOrigin) {
                   const observation = failedStepObservation({ pageUrl: page.url(), scenario, step, stepIndex: i, runId,
                     scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`) });
-                  if (observation) observations.push(observation);
+                  if (observation) {
+                    if (errorScreenshot) observation.evidence = { screenshot: errorScreenshot };
+                    observations.push(observation);
+                  }
                 }
-                result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs: Date.now() - stamp, error: message });
+                result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs, error: message, screenshot: errorScreenshot });
                 result.status = 'failed';
                 if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',
                   title: `Шаг ${i + 1}: ${name}`, description: message, scenario: scenario.title, viewport: viewportLabel,
                   reproduction: `Открыть ${config.baseUrl} → ${scenario.steps.slice(0, i + 1).map(item => item.name || item.type).join(' → ')}`,
-                  step: i + 1, screenshot: null
+                  step: i + 1, screenshot: errorScreenshot
                 });
                 break;
               }
@@ -222,17 +241,21 @@ async function executeAudit(raw) {
               });
             }
             const filename = `${sIdx + 1}-${vIdx + 1}-${safeName(scenario.id)}-${safeName(vp.id)}.png`;
+            let wroteFinalScreenshot = false;
             try {
               if (outsideOrigin) throw Error('Скриншот чужого origin не сохраняется');
               await screenshotWithRedaction(page, { path: path.join(screenshots, filename), fullPage: false, timeout: 8000 });
+              wroteFinalScreenshot = true;
+              if (navigationLoaded) assertCurrentOrigin();
               result.screenshot = filename;
               for (let index = observationStart; index < observations.length; index++) {
-                observations[index].evidence = { screenshot: filename };
+                if (observations[index].source !== 'playwright' && !observations[index].evidence) observations[index].evidence = { screenshot: filename };
               }
               for (let index = issueStart; index < report.issues.length; index++) {
-                if (!report.issues[index].screenshot) report.issues[index].screenshot = filename;
+                if (!report.issues[index].screenshot && !Number.isInteger(report.issues[index].step)) report.issues[index].screenshot = filename;
               }
             } catch (error) {
+              if (wroteFinalScreenshot && outsideOrigin) await fs.unlink(path.join(screenshots, filename)).catch(() => {});
               report.warnings.push(`Скриншот ${scenario.title}/${viewportLabel}: ${String(error.message || error).slice(0, 140)}`);
             }
             result.durationMs = Date.now() - runStart;
