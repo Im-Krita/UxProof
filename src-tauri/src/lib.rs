@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 use std::{
     fs::{self, File, OpenOptions},
-    io::Read,
+    io::{Read, Write},
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -222,14 +222,18 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-fn run_node(script: &Path, input: &Path) -> Result<Vec<u8>, String> {
+fn run_node(script: &Path, input: &[u8]) -> Result<Vec<u8>, String> {
     let mut child = Command::new("node")
         .arg(script)
-        .arg(input)
+        .arg("-")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Не удалось запустить Node.js: {e}. Установите Node.js 22+ и выполните npm install в runner/"))?;
+    let mut stdin = child.stdin.take().ok_or("Нет stdin у процесса Node.js")?;
+    let input = input.to_vec();
+    let in_handle = thread::spawn(move || stdin.write_all(&input));
     let mut stdout = child.stdout.take().ok_or("Нет stdout у процесса Node.js")?;
     let mut stderr = child.stderr.take().ok_or("Нет stderr у процесса Node.js")?;
     let out_handle = thread::spawn(move || {
@@ -253,15 +257,17 @@ fn run_node(script: &Path, input: &Path) -> Result<Vec<u8>, String> {
                 return Err("Проверка превысила лимит времени и была остановлена".into());
             }
             Ok(None) => thread::sleep(Duration::from_millis(200)),
-            Err(error) => return Err(error.to_string()),
+            Err(error) => { kill_tree(&mut child); return Err(error.to_string()); }
         }
     };
     let stdout_buf = out_handle.join().map_err(|_| "Не удалось прочитать stdout".to_string())?;
     let stderr_buf = err_handle.join().map_err(|_| "Не удалось прочитать stderr".to_string())?;
+    let input_result = in_handle.join().map_err(|_| "Не удалось передать данные runner".to_string())?;
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr_buf);
         return Err(format!("Проверка завершилась с ошибкой: {}", stderr.chars().take(1500).collect::<String>()));
     }
+    input_result.map_err(|e| format!("Не удалось передать данные runner: {e}"))?;
     Ok(stdout_buf)
 }
 
@@ -291,11 +297,10 @@ async fn run_audit(app: tauri::AppHandle, config: Value) -> Result<Value, String
         // The worker owns the guard so cancellation of the IPC future cannot unlock a running audit.
         let _guard = guard;
         let _file_guard = file_guard;
-        let input = dir.join("input.json");
         let mut payload = config;
         payload["runId"] = json!(id);
         payload["outputDir"] = json!(dir.to_string_lossy().to_string());
-        fs::write(&input, serde_json::to_vec(&payload).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let input = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
         let stdout = run_node(&script, &input)?;
         serde_json::from_slice(&stdout).map_err(|e| format!("Некорректный ответ runner: {e}"))
     })
@@ -477,6 +482,18 @@ mod tests {
         drop(held);
         assert!(child("available"));
         fs::remove_file(dir.join(".audit.lock")).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn runner_receives_config_through_stdin() {
+        let dir = std::env::temp_dir().join(format!("uxproof-stdin-test-{}", Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let script = dir.join("runner.mjs");
+        fs::write(&script, "let s=''; for await (const c of process.stdin) s += c; process.stdout.write(JSON.parse(s).probe);").unwrap();
+        let output = run_node(&script, br#"{"probe":"received"}"#).unwrap();
+        assert_eq!(output, b"received");
+        fs::remove_file(script).unwrap();
         fs::remove_dir(dir).unwrap();
     }
 }
