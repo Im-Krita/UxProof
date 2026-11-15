@@ -1,4 +1,5 @@
 import type { AuditConfig, AuditReport } from './types';
+import { isHistoryReport } from '../../runner/history.mjs';
 function tauriAvailable() { return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window; }
 async function invokeTauri<T>(name:string,args:Record<string,unknown>={}) { const {invoke}=await import('@tauri-apps/api/core'); return invoke<T>(name,args); }
 async function responseJson<T>(path:string,init?:RequestInit):Promise<T> {
@@ -14,7 +15,11 @@ export function runAudit(config:AuditConfig) {
   throw error;
  });
 }
-export function listReports() { return tauriAvailable() ? invokeTauri<AuditReport[]>('list_reports') : responseJson<AuditReport[]>('/api/history'); }
+export async function listReports():Promise<AuditReport[]> {
+ const records:unknown = await (tauriAvailable() ? invokeTauri<unknown>('list_reports') : responseJson<unknown>('/api/history'));
+ if (!Array.isArray(records)) throw new Error('Некорректный ответ истории');
+ return records.filter(isHistoryReport);
+}
 export async function screenshotUrl(runId:string,filename:string):Promise<string> {
  if(tauriAvailable()) return invokeTauri<string>('read_screenshot',{runId,filename});
  return `/api/image?runId=${encodeURIComponent(runId)}&file=${encodeURIComponent(filename)}`;

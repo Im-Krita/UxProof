@@ -5,9 +5,12 @@ import crypto from 'node:crypto';
 import { ConflictError, runAudit } from './audit.mjs';
 import { InputError, validateConfig } from './validators.mjs';
 import { isResolvedInside } from './policy.mjs';
+import { isHistoryReport } from './history.mjs';
 
 const root = path.resolve('.uxproof-data/runs');
 await fs.mkdir(root, { recursive:true });
+const port = Number(process.env.UXPROOF_DEV_PORT ?? 4179);
+if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Недопустимый порт dev API');
 const json = (res, code, obj) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(obj)); };
 const token = s => typeof s==='string' && /^[a-zA-Z0-9_.-]{1,128}$/.test(s) && s!=='.' && s!=='..';
 const server = http.createServer(async (req,res) => {
@@ -27,7 +30,10 @@ const server = http.createServer(async (req,res) => {
       const reports=[];
       for (const name of await fs.readdir(root)) {
         if (!token(name)) continue;
-        try { reports.push(JSON.parse(await fs.readFile(path.join(root,name,'report.json'),'utf8'))); } catch { /* skip */ }
+        try {
+          const report = JSON.parse(await fs.readFile(path.join(root,name,'report.json'),'utf8'));
+          if (isHistoryReport(report)) reports.push(report);
+        } catch { /* skip malformed or incomplete reports */ }
       }
       reports.sort((a,b)=>b.startedAt.localeCompare(a.startedAt));
       return json(res,200,reports.slice(0,30));
@@ -59,4 +65,4 @@ const server = http.createServer(async (req,res) => {
     return json(res, code, {error: message.slice(0, 500)});
   }
 });
-server.listen(4179,'127.0.0.1',()=>console.log('UXProof runner dev API: http://127.0.0.1:4179'));
+server.listen(port,'127.0.0.1',()=>console.log(`UXProof runner dev API: http://127.0.0.1:${server.address().port}`));
