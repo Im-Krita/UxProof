@@ -109,8 +109,9 @@ test('a cross-origin redirect stops subsequent scripted actions', async () => {
 });
 
 test('a click that navigates outside the project stops the following step', async () => {
-  let actionHits = 0;
+  let actionHits = 0, targetHits = 0;
   const target = http.createServer((req, res) => {
+    targetHits++;
     if (req.url === '/action') { actionHits++; res.end('action'); return; }
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end('<!doctype html><title>Other origin</title><button id="action" onclick="fetch(\'/action\')">Action</button>');
@@ -132,6 +133,8 @@ test('a click that navigates outside the project stops the following step', asyn
     assert.equal(report.results[0].steps.length, 1);
     assert.equal(report.results[0].screenshot, null);
     assert.equal(actionHits, 0);
+    assert.equal(targetHits, 0);
+    assert.ok(report.warnings.some(warning => /заблокирован до загрузки/.test(warning)));
   } finally {
     await Promise.all([new Promise(resolve => origin.close(resolve)), new Promise(resolve => target.close(resolve))]);
     const shots = path.join(dir, 'screenshots');

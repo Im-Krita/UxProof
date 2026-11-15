@@ -124,25 +124,35 @@ async function executeAudit(raw) {
           let pageErrorCount = 0;
           let outsideOrigin = false;
           let navigationLoaded = false;
+          const recordOutsideOrigin = message => {
+            if (outsideOrigin) return;
+            outsideOrigin = true;
+            result.status = 'failed';
+            report.status = 'incomplete';
+            report.warnings.push(message);
+            report.issues.push({ id: `NAV-${report.issues.length + 1}`, kind: 'functional', status: 'confirmed', severity: 'high',
+              title: 'Переход за пределы проекта', description: 'Обнаружен переход на другой origin; шаги и сбор доказательств остановлены.',
+              scenario: scenario.title, viewport: viewportLabel, screenshot: null });
+          };
           const assertCurrentOrigin = () => {
+            if (outsideOrigin) throw Error('Переход за пределы адреса проекта');
             let currentOrigin = '';
             try { currentOrigin = new URL(page.url()).origin; } catch { /* treated as outside the project */ }
             if (currentOrigin === new URL(config.baseUrl).origin) return;
-            if (!outsideOrigin) {
-              outsideOrigin = true;
-              result.status = 'failed';
-              report.status = 'incomplete';
-              report.warnings.push('Переход за пределы адреса проекта обнаружен после загрузки; дальнейшие шаги остановлены.');
-              report.issues.push({ id: `NAV-${report.issues.length + 1}`, kind: 'functional', status: 'confirmed', severity: 'high',
-                title: 'Переход за пределы проекта', description: 'Обнаружен переход на другой origin; шаги и сбор доказательств остановлены.',
-                scenario: scenario.title, viewport: viewportLabel, screenshot: null });
-            }
+            recordOutsideOrigin('Переход за пределы адреса проекта обнаружен после загрузки; дальнейшие шаги остановлены.');
             throw Error('Переход за пределы адреса проекта');
           };
           // Page-controlled exception messages may contain credentials or form values.
           page.on('pageerror', () => { pageErrorCount = Math.min(pageErrorCount + 1, 1000); });
           await context.route('**/*', async route => {
             try {
+              const request = route.request();
+              if (request.isNavigationRequest() && request.frame() === page.mainFrame() &&
+                  new URL(request.url()).origin !== new URL(config.baseUrl).origin) {
+                recordOutsideOrigin('Переход за пределы адреса проекта заблокирован до загрузки; дальнейшие шаги остановлены.');
+                await route.abort('blockedbyclient').catch(() => {});
+                return;
+              }
               await assertRequestAllowed(route.request().url(), config.baseUrl, basePolicy.baseLoopback, undefined, basePolicy.addresses);
               await route.continue();
             } catch (error) {
