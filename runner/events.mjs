@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { validateDomSummary } from './dom-summary.mjs';
+import { validateElementGeometry } from './element-geometry.mjs';
 
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const fail = () => { throw new TypeError('Invalid scenario event sequence'); };
@@ -36,7 +37,9 @@ export function validateScenarioEvents(report) {
       if (event.screenshot !== (step.screenshot ?? null) ||
           (event.screenshot !== null && !/^[a-zA-Z0-9_-]{1,160}\.png$/.test(event.screenshot))) fail();
       if (event.domSummary !== undefined && event.domSummary !== null) validateDomSummary(event.domSummary);
-    } else if (event.screenshot !== undefined || event.domSummary !== undefined) fail();
+      if (event.elementGeometry !== undefined && event.elementGeometry !== null &&
+          (!event.screenshot || !validateElementGeometry(event.elementGeometry))) fail();
+    } else if (event.screenshot !== undefined || event.domSummary !== undefined || event.elementGeometry !== undefined) fail();
     eventIds.add(event.eventId);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(event);

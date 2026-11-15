@@ -19,14 +19,26 @@
           "stepType": { "type": "string", "pattern": "\\S" }, "phase": { "enum": ["before", "action", "after", "error"] },
           "at": { "type": "string", "format": "date-time" },
           "screenshot": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,160}\\.png$" }] },
-          "domSummary": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/domSummary" }] }
+          "domSummary": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/domSummary" }] },
+          "elementGeometry": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/elementGeometry" }] }
         },
         "allOf": [{ "if": { "properties": { "phase": { "const": "error" } }, "required": ["phase"] },
-          "then": { "required": ["screenshot"] }, "else": { "not": { "anyOf": [{ "required": ["screenshot"] }, { "required": ["domSummary"] }] } } }]
+          "then": { "required": ["screenshot"], "allOf": [{ "if": { "properties": { "elementGeometry": { "type": "object" } }, "required": ["elementGeometry"] }, "then": { "properties": { "screenshot": { "type": "string" } } } }] }, "else": { "not": { "anyOf": [{ "required": ["screenshot"] }, { "required": ["domSummary"] }, { "required": ["elementGeometry"] }] } } }]
       }
     }
   },
   "$defs": {
+    "elementGeometry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["x", "y", "width", "height", "viewportWidth", "viewportHeight", "deviceScaleFactor", "scrollX", "scrollY"],
+      "properties": {
+        "x": { "type": "number", "minimum": -10000000, "maximum": 10000000 }, "y": { "type": "number", "minimum": -10000000, "maximum": 10000000 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000000 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000000 },
+        "viewportWidth": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000000 }, "viewportHeight": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000000 },
+        "deviceScaleFactor": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 },
+        "scrollX": { "type": "number", "minimum": -10000000, "maximum": 10000000 }, "scrollY": { "type": "number", "minimum": -10000000, "maximum": 10000000 }
+      }
+    },
     "count": { "type": "integer", "minimum": 0, "maximum": 5000 },
     "domSummary": {
       "type": "object", "additionalProperties": false, "required": ["capturedAt", "viewport", "visible", "coverage"],

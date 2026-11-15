@@ -19,6 +19,9 @@ test('field assertion values do not appear in persisted JSON or HTML', async () 
         { type: 'expectValue', name: 'Check', target: 'css:#field', value: 'expected-test-secret' }
       ] }], viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } });
     assert.equal(result.results[0].status, 'failed');
+    assert.ok(result.scenarioEvents.at(-1).elementGeometry);
+    assert.equal(result.scenarioEvents.at(-1).elementGeometry.deviceScaleFactor, 1);
+    assert.ok(!JSON.stringify(result.scenarioEvents.at(-1).elementGeometry).includes('actual-test-secret'));
     for (const filename of ['report.json', 'report.html', 'artifacts.json']) {
       const text = await fs.readFile(path.join(dir, filename), 'utf8');
       assert.ok(!text.includes('actual-test-secret'));

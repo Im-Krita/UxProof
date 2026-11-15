@@ -18,6 +18,8 @@ test('rejects inconsistent event IDs, phases, result links and screenshots', () 
     r => { r.scenarioEvents[2].screenshot = 'another.png'; },
     r => { r.scenarioEvents[2].runId = 'other'; },
     r => { r.scenarioEvents[0].domSummary = { leakedText: 'secret' }; },
+    r => { r.scenarioEvents[0].elementGeometry = {}; },
+    r => { r.scenarioEvents[2].elementGeometry = { leakedText: 'secret' }; },
     r => { r.scenarioEvents[2].domSummary = { leakedText: 'secret' }; },
     r => { r.scenarioEvents.pop(); },
     r => { r.scenarioEventsVersion = 'future'; }

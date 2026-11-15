@@ -14,6 +14,7 @@ import { startGuardProxy } from './guard-proxy.mjs';
 import { writeArtifactManifest } from './artifacts.mjs';
 import { stepEvent, validateScenarioEvents } from './events.mjs';
 import { collectDomSummary } from './dom-summary.mjs';
+import { collectElementGeometry } from './element-geometry.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -199,6 +200,11 @@ async function executeAudit(raw) {
                   }
                 }
                 let domSummary = null;
+                let elementGeometry = null;
+                if (!outsideOrigin && errorScreenshot && step.target) {
+                  elementGeometry = await collectElementGeometry(page, step.target);
+                  try { assertCurrentOrigin(); } catch { elementGeometry = null; }
+                }
                 if (!outsideOrigin) {
                   try {
                     assertCurrentOrigin();
@@ -214,6 +220,7 @@ async function executeAudit(raw) {
                   await fs.unlink(path.join(screenshots, errorScreenshot)).catch(() => {});
                   errorScreenshot = null;
                   domSummary = null;
+                  elementGeometry = null;
                 }
                 if (!outsideOrigin) {
                   const observation = failedStepObservation({ pageUrl: page.url(), scenario, step, stepIndex: i, runId,
@@ -224,7 +231,7 @@ async function executeAudit(raw) {
                   }
                 }
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs, error: message, screenshot: errorScreenshot });
-                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot, domSummary }));
+                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot, domSummary, elementGeometry }));
                 result.status = 'failed';
                 if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',
