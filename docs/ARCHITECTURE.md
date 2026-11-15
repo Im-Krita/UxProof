@@ -80,7 +80,7 @@ UI: клик "Запустить аудит"
       page.screenshot(screenshots/....png) с маской полей, iframe, canvas и видео
       optionally reviewScreenshot() (max 1 per scenario, max 3 calls)
       context.close()
- -> summary, report.json, report.html
+ -> summary, report.json, report.html, artifacts.json (относительные пути и SHA-256)
  -> report to UI
  -> history available on disk
 ```

@@ -21,6 +21,7 @@
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png", "icons/icon.ico"],
     "resources": {
       "../runner/ai.mjs": "runner/ai.mjs",
+      "../runner/artifacts.mjs": "runner/artifacts.mjs",
       "../runner/audit.mjs": "runner/audit.mjs",
       "../runner/cli.mjs": "runner/cli.mjs",
       "../runner/comparison.mjs": "runner/comparison.mjs",

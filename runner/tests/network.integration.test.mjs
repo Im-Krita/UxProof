@@ -26,7 +26,7 @@ test('browser aborts redirects to cloud metadata addresses', async () => {
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });
@@ -71,7 +71,7 @@ test('permitted redirects, cookies, POST and WebSockets still work through the p
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });
@@ -103,7 +103,7 @@ test('a cross-origin redirect stops subsequent scripted actions', async () => {
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });
@@ -137,7 +137,7 @@ test('a click that navigates outside the project stops the following step', asyn
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });

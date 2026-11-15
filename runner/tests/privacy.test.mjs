@@ -19,7 +19,7 @@ test('field assertion values do not appear in persisted JSON or HTML', async () 
         { type: 'expectValue', name: 'Check', target: 'css:#field', value: 'expected-test-secret' }
       ] }], viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } });
     assert.equal(result.results[0].status, 'failed');
-    for (const filename of ['report.json', 'report.html']) {
+    for (const filename of ['report.json', 'report.html', 'artifacts.json']) {
       const text = await fs.readFile(path.join(dir, filename), 'utf8');
       assert.ok(!text.includes('actual-test-secret'));
       assert.ok(!text.includes('expected-test-secret'));
@@ -30,7 +30,7 @@ test('field assertion values do not appear in persisted JSON or HTML', async () 
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });

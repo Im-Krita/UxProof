@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
-import { executeStep, safeName, validateConfig, evidenceType } from './validators.mjs';
+import { executeStep, validateConfig, evidenceType } from './validators.mjs';
 import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
 import { assertRequestAllowed, prepareBasePolicy } from './policy.mjs';
@@ -11,6 +11,7 @@ import { comparisonKey } from './comparison.mjs';
 import { validateNormalizedReport } from './report-contract.mjs';
 import { screenshotWithRedaction } from './screenshot.mjs';
 import { startGuardProxy } from './guard-proxy.mjs';
+import { writeArtifactManifest } from './artifacts.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -240,7 +241,7 @@ async function executeAudit(raw) {
                 title: 'JavaScript exception', description: message, scenario: scenario.title, viewport: viewportLabel, screenshot: null
               });
             }
-            const filename = `${sIdx + 1}-${vIdx + 1}-${safeName(scenario.id)}-${safeName(vp.id)}.png`;
+            const filename = `run-${sIdx + 1}-${vIdx + 1}.png`;
             let wroteFinalScreenshot = false;
             try {
               if (outsideOrigin) throw Error('Скриншот чужого origin не сохраняется');
@@ -307,8 +308,23 @@ async function executeAudit(raw) {
     aiSuggestions: report.issues.filter(item => item.status === 'recommendation').length,
     accessibilityIssues: report.issues.filter(item => item.kind === 'accessibility').length
   };
+  report.artifactManifest = 'artifacts.json';
   await fs.writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
   await fs.writeFile(path.join(outputDir, 'report.html'), renderHtml(report), 'utf8');
+  const screenshotNames = [
+    ...report.results.flatMap(result => [result.screenshot, ...result.steps.map(step => step.screenshot)]),
+    ...report.issues.map(issue => issue.screenshot),
+    ...report.normalizedFindings.flatMap(finding => finding.observations.map(observation => observation.evidence?.screenshot))
+  ].filter(name => typeof name === 'string' && name);
+  try {
+    await writeArtifactManifest(outputDir, runId, ['report.json', 'report.html', ...screenshotNames.map(name => `screenshots/${name}`)]);
+  } catch (error) {
+    report.status = 'incomplete';
+    delete report.artifactManifest;
+    report.warnings.push(`Не удалось создать manifest артефактов: ${String(error?.message || error).slice(0, 160)}`);
+    await fs.writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
+    await fs.writeFile(path.join(outputDir, 'report.html'), renderHtml(report), 'utf8');
+  }
   return report;
 }
 
