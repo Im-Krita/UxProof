@@ -32,6 +32,7 @@ test('bundle does not include the entire runner directory or local environment f
 });
 
 test('explicit bundle resources run a real audit outside the checkout', { timeout: 60000 }, async () => {
+  const portable = process.platform === 'win32' && process.env.UXPROOF_TEST_PORTABLE === '1';
   const tempRoot = await fs.realpath(os.tmpdir());
   const stage = await fs.mkdtemp(path.join(tempRoot, 'uxproof-bundle-test-'));
   const realStage = await fs.realpath(stage);
@@ -45,6 +46,7 @@ test('explicit bundle resources run a real audit outside the checkout', { timeou
     const configDir = fileURLToPath(new URL('../../src-tauri/', import.meta.url));
     for (const [source, target] of Object.entries(config.bundle.resources)) {
       if (source.includes('*')) continue; // Schemas are not executed by the runner.
+      if (!portable && target === 'runtime/') continue; // Tested explicitly with UXPROOF_TEST_PORTABLE=1.
       const dest = path.resolve(realStage, target);
       const relative = path.relative(realStage, dest);
       if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw Error('Unsafe bundle path');
@@ -56,7 +58,10 @@ test('explicit bundle resources run a real audit outside the checkout', { timeou
     const audit = { runId: 'packaging-test', outputDir: path.join(realStage, 'output'), project: 'fixture', baseUrl: `http://127.0.0.1:${server.address().port}/`,
       scenarios: [{ id: 's', title: 'fixture', steps: [{ type: 'expectVisible', target: 'css:#ok', name: 'Visible' }] }],
       viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } };
-    const child = spawn(process.execPath, [path.join(realStage, 'runner', 'cli.mjs'), '-'], { cwd: realStage, stdio: ['pipe', 'pipe', 'pipe'] });
+    const executable = portable ? path.join(realStage, 'runtime', 'node.exe') : process.execPath;
+    const env = portable ? { ...process.env, PATH: path.join(process.env.SystemRoot || 'C:\\Windows', 'System32'),
+      LOCALAPPDATA: path.join(realStage, 'empty-localappdata'), PLAYWRIGHT_BROWSERS_PATH: path.join(realStage, 'runtime', 'playwright'), NODE_OPTIONS: '' } : process.env;
+    const child = spawn(executable, [path.join(realStage, 'runner', 'cli.mjs'), '-'], { cwd: realStage, env, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
     child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });

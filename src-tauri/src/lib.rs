@@ -230,15 +230,29 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-fn run_node(script: &Path, input: &[u8]) -> Result<Vec<u8>, String> {
-    let mut child = Command::new("node")
-        .arg(script)
+fn select_runtime(resource_dir: &Path, allow_dev: bool) -> Result<(PathBuf, Option<PathBuf>), String> {
+    if allow_dev || !cfg!(windows) { return Ok((PathBuf::from("node"), None)); }
+    let runtime = resource_dir.join("runtime");
+    let node = runtime.join("node.exe");
+    let browsers = runtime.join("playwright");
+    if !node.is_file() || !browsers.is_dir() {
+        return Err("В установке отсутствует встроенный Node.js или Chromium. Переустановите приложение.".into());
+    }
+    Ok((node, Some(browsers)))
+}
+
+fn run_node(script: &Path, input: &[u8], node: &Path, browsers: Option<&Path>) -> Result<Vec<u8>, String> {
+    let mut command = Command::new(node);
+    if let Some(browser_dir) = browsers {
+        command.env("PLAYWRIGHT_BROWSERS_PATH", browser_dir).env_remove("NODE_OPTIONS");
+    }
+    let mut child = command.arg(script)
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Не удалось запустить Node.js: {e}. Установите Node.js 22+ и выполните npm install в runner/"))?;
+        .map_err(|e| format!("Не удалось запустить Node.js: {e}"))?;
     let mut stdin = child.stdin.take().ok_or("Нет stdin у процесса Node.js")?;
     let input = input.to_vec();
     let in_handle = thread::spawn(move || stdin.write_all(&input));
@@ -301,6 +315,7 @@ async fn run_audit(app: tauri::AppHandle, config: Value) -> Result<Value, String
     let dir = root.join(&id);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let script = runner_script(&app)?;
+    let (node, browsers) = select_runtime(&app.path().resource_dir().map_err(|e| e.to_string())?, cfg!(debug_assertions))?;
     tauri::async_runtime::spawn_blocking(move || {
         // The worker owns the guard so cancellation of the IPC future cannot unlock a running audit.
         let _guard = guard;
@@ -309,7 +324,7 @@ async fn run_audit(app: tauri::AppHandle, config: Value) -> Result<Value, String
         payload["runId"] = json!(id);
         payload["outputDir"] = json!(dir.to_string_lossy().to_string());
         let input = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
-        let stdout = run_node(&script, &input)?;
+        let stdout = run_node(&script, &input, &node, browsers.as_deref())?;
         serde_json::from_slice(&stdout).map_err(|e| format!("Некорректный ответ runner: {e}"))
     })
     .await
@@ -505,9 +520,27 @@ mod tests {
         fs::create_dir(&dir).unwrap();
         let script = dir.join("runner.mjs");
         fs::write(&script, "let s=''; for await (const c of process.stdin) s += c; process.stdout.write(JSON.parse(s).probe);").unwrap();
-        let output = run_node(&script, br#"{"probe":"received"}"#).unwrap();
+        let output = run_node(&script, br#"{"probe":"received"}"#, Path::new("node"), None).unwrap();
         assert_eq!(output, b"received");
         fs::remove_file(script).unwrap();
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn release_requires_packaged_runtime_and_dev_uses_system_node() {
+        let dir = std::env::temp_dir().join(format!("uxproof-runtime-test-{}", Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        assert!(select_runtime(&dir, false).is_err());
+        assert_eq!(select_runtime(&dir, true).unwrap(), (PathBuf::from("node"), None));
+        let runtime = dir.join("runtime");
+        let browsers = runtime.join("playwright");
+        fs::create_dir_all(&browsers).unwrap();
+        fs::write(runtime.join("node.exe"), b"fixture").unwrap();
+        assert_eq!(select_runtime(&dir, false).unwrap(), (runtime.join("node.exe"), Some(browsers.clone())));
+        fs::remove_file(runtime.join("node.exe")).unwrap();
+        fs::remove_dir(browsers).unwrap();
+        fs::remove_dir(runtime).unwrap();
         fs::remove_dir(dir).unwrap();
     }
 

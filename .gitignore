@@ -7,6 +7,7 @@ runner/.env
 dist/
 src-tauri/target/
 .uxproof-data/
+.uxproof-build/
 *.log
 *.tsbuildinfo
 .DS_Store
