@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compareFindings, comparisonKey } from '../comparison.mjs';
-import { presentableFindings } from '../matching.mjs';
+import { presentableFindings, recheckedSteps } from '../matching.mjs';
 
 test('does not claim resolution when coverage is partial', () => {
   const before = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' }, normalizedFindings: [{ findingId: 'a' }, { findingId: 'b' }] };
@@ -51,4 +51,24 @@ test('presentable findings accept unknown rule IDs but reject foreign or unsafe 
   assert.equal(presentableFindings(otherRun), null);
   const traversal = structuredClone(report); traversal.normalizedFindings[0].observations[0].evidence.screenshot = '../secret.png';
   assert.equal(presentableFindings(traversal), null);
+});
+
+test('step recheck counts only matching passed executions without claiming resolution', () => {
+  const finding = { findingId: 'f', ruleId: 'playwright:step:expectText', observations: [
+    { runId: 'old', source: 'playwright', scenarioId: 's', viewportId: 'v', stepId: '1' },
+    { runId: 'old', source: 'playwright', scenarioId: 's', viewportId: 'mobile', stepId: '1' }
+  ] };
+  const base = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' }, scenarioEventsVersion: '0.1' };
+  const event = (runId, viewportId, phase) => ({ runId, scenarioId: 's', viewportId, stepId: '1', stepType: 'expectText', combinationId: viewportId, phase });
+  const before = { ...base, runId: 'old', normalizedFindings: [finding], scenarioEvents: [event('old', 'v', 'error'), event('old', 'mobile', 'error')] };
+  const after = { ...base, runId: 'new', normalizedFindings: [], results: [{ id: 'v', steps: [{ index: 1, type: 'expectText', status: 'passed' }] }],
+    scenarioEvents: ['before', 'action', 'after'].map(phase => event('new', 'v', phase)) };
+  assert.deepEqual(recheckedSteps(before, after, finding), { passed: 1, total: 2 });
+  assert.equal(compareFindings(before, after).findings[0].status, 'unverified');
+  const corrupted = structuredClone(after); corrupted.scenarioEvents.pop();
+  assert.deepEqual(recheckedSteps(before, corrupted, finding), { passed: 0, total: 2 });
+  assert.equal(recheckedSteps(before, { ...after, comparisonKey: 'different' }, finding), null);
+  assert.equal(recheckedSteps(before, { ...after, scenarioEventsVersion: undefined }, finding), null);
+  const duplicated = structuredClone(finding); duplicated.observations.push(duplicated.observations[0]);
+  assert.equal(recheckedSteps({ ...before, normalizedFindings: [duplicated] }, after, duplicated), null);
 });

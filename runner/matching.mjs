@@ -20,6 +20,39 @@ export function compareFindings(before, after) {
   ] };
 }
 
+// A passed step is evidence about that execution, not proof that a defect is fixed.
+export function recheckedSteps(before, after, finding) {
+  if (!compareFindings(before, after).comparable || before.scenarioEventsVersion !== '0.1' ||
+      after.scenarioEventsVersion !== '0.1' || !Array.isArray(before.scenarioEvents) ||
+      !Array.isArray(after.scenarioEvents) || !Array.isArray(after.results) ||
+      !finding || !before.normalizedFindings.includes(finding) ||
+      !finding.ruleId?.startsWith('playwright:step:') || !Array.isArray(finding.observations) || !finding.observations.length) return null;
+  const type = finding.ruleId.slice('playwright:step:'.length);
+  const unique = new Set();
+  let passed = 0;
+  for (const observation of finding.observations) {
+    const { scenarioId, viewportId, stepId } = observation || {};
+    if (observation?.runId !== before.runId || observation.source !== 'playwright' ||
+        typeof scenarioId !== 'string' || !scenarioId || typeof viewportId !== 'string' || !viewportId ||
+        typeof stepId !== 'string' || !/^[1-9]\d*$/.test(stepId)) return null;
+    const key = JSON.stringify([scenarioId, viewportId, stepId]);
+    if (unique.has(key)) return null;
+    unique.add(key);
+    const relevant = (report, phase) => report.scenarioEvents.filter(event => event?.runId === report.runId &&
+      event.scenarioId === scenarioId && event.viewportId === viewportId && event.stepId === stepId &&
+      event.stepType === type && event.phase === phase);
+    if (relevant(before, 'error').length !== 1) return null;
+    const events = after.scenarioEvents.filter(event => event?.runId === after.runId && event.scenarioId === scenarioId &&
+      event.viewportId === viewportId && event.stepId === stepId && event.stepType === type);
+    const phases = events.map(event => event.phase).join('/');
+    if (phases !== 'before/action/after' || events.some(event => !event.combinationId || event.combinationId !== events[0].combinationId)) continue;
+    const results = after.results.filter(result => result?.id === events[0].combinationId);
+    const steps = results.length === 1 && Array.isArray(results[0].steps) ? results[0].steps.filter(step => String(step.index) === stepId) : [];
+    if (steps.length === 1 && steps[0].type === type && steps[0].status === 'passed') passed++;
+  }
+  return { passed, total: unique.size };
+}
+
 // Validate only the fields needed to render the extension; unknown rule IDs remain visible.
 export function presentableFindings(report) {
   if (!report || typeof report.runId !== 'string' || !report.runId ||
