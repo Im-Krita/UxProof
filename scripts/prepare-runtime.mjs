@@ -29,6 +29,25 @@ const browserDir = path.join(browserRoot, `chromium_headless_shell-${browser.rev
 const browserExe = path.join(browserDir, 'chrome-headless-shell-win64', 'chrome-headless-shell.exe');
 await fs.access(path.join(browserDir, 'INSTALLATION_COMPLETE'));
 await fs.access(browserExe);
+const manifestPath = path.join(project, 'scripts/runtime-manifests', `chromium-headless-win64-${browser.revision}.json`);
+const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+if (manifest.revision !== browser.revision || manifest.browserVersion !== browser.browserVersion ||
+    !/^[a-f0-9]{64}$/.test(manifest.archiveSha256 || '') || !manifest.files || typeof manifest.files !== 'object' || Array.isArray(manifest.files)) {
+  throw Error('Chromium verification manifest does not match Playwright');
+}
+const files = Object.entries(manifest.files);
+if (!files.length || files.length > 1000 || !manifest.files['chrome-headless-shell-win64/chrome-headless-shell.exe'] ||
+    !manifest.files['chrome-headless-shell-win64/LICENSE.headless_shell']) throw Error('Incomplete Chromium verification manifest');
+const sourceRoot = await fs.realpath(browserDir);
+for (const [name, expected] of files) {
+  if (!/^chrome-headless-shell-win64\/[a-zA-Z0-9_./-]+$/.test(name) || name.split('/').includes('..') ||
+      path.posix.normalize(name) !== name || !/^[a-f0-9]{64}$/.test(expected)) throw Error('Unsafe Chromium manifest entry');
+  const source = path.join(browserDir, ...name.split('/'));
+  const info = await fs.lstat(source), realSource = await fs.realpath(source);
+  const relative = path.relative(sourceRoot, realSource);
+  if (!info.isFile() || info.isSymbolicLink() || !relative || relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative) ||
+      await hash(source) !== expected) throw Error(`Chromium cache does not match verified archive: ${name}`);
+}
 for (const source of [await fs.realpath(node), await fs.realpath(browserDir)]) {
   const relative = path.relative(runtime, source);
   if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) {
@@ -43,28 +62,15 @@ try {
 } catch (error) { if (error.code !== 'ENOENT') throw error; }
 await fs.mkdir(path.join(runtime, 'playwright'), { recursive: true });
 await fs.copyFile(node, path.join(runtime, 'node.exe'));
-const browserRootFiles = new Set(['ABOUT', 'chrome-headless-shell.exe', 'headless_command_resources.pak', 'headless_lib_data.pak',
-  'headless_lib_strings.pak', 'icudtl.dat', 'libEGL.dll', 'libGLESv2.dll', 'LICENSE.headless_shell', 'v8_context_snapshot.bin',
-  'vk_swiftshader_icd.json', 'vk_swiftshader.dll', 'vulkan-1.dll']);
-const allowedDirs = new Set(['', 'chrome-headless-shell-win64', 'chrome-headless-shell-win64/hyphen-data', 'chrome-headless-shell-win64/locales',
-  'chrome-headless-shell-win64/resources', 'chrome-headless-shell-win64/resources/accessibility',
-  'chrome-headless-shell-win64/resources/accessibility/reading_mode_gdocs_helper']);
-const allowedFile = relative => {
-  if (['INSTALLATION_COMPLETE', 'DEPENDENCIES_VALIDATED'].includes(relative)) return true;
-  const prefix = 'chrome-headless-shell-win64/';
-  if (!relative.startsWith(prefix)) return false;
-  const item = relative.slice(prefix.length);
-  return browserRootFiles.has(item) || /^(locales\/[a-zA-Z0-9_-]+\.pak|hyphen-data\/[a-zA-Z0-9_-]+\.hyb)$/.test(item) ||
-    ['resources/accessibility/reading_mode_gdocs_helper_manifest.json', 'resources/accessibility/reading_mode_gdocs_helper/content.js',
-      'resources/accessibility/reading_mode_gdocs_helper/gdocs_script.js'].includes(item);
-};
-await fs.cp(browserDir, path.join(runtime, 'playwright', path.basename(browserDir)), { recursive: true, filter: async source => {
-  const info = await fs.lstat(source);
-  if (info.isSymbolicLink()) throw Error('Browser distribution contains a symbolic link');
-  const relative = path.relative(browserDir, source).split(path.sep).join('/');
-  return info.isDirectory() ? allowedDirs.has(relative) : info.isFile() && allowedFile(relative);
-} });
-const chromiumSha256 = await hash(browserExe);
+const destinationRoot = path.join(runtime, 'playwright', path.basename(browserDir));
+for (const [name, expected] of files) {
+  const destination = path.join(destinationRoot, ...name.split('/'));
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(path.join(browserDir, ...name.split('/')), destination);
+  if (await hash(destination) !== expected) throw Error(`Copied Chromium file failed verification: ${name}`);
+}
+await fs.writeFile(path.join(destinationRoot, 'INSTALLATION_COMPLETE'), '');
+const chromiumSha256 = manifest.files['chrome-headless-shell-win64/chrome-headless-shell.exe'];
 await fs.writeFile(path.join(runtime, 'runtime-metadata.json'), JSON.stringify({ nodeVersion, nodeSha256, playwrightRevision: browser.revision,
-  chromiumVersion: browser.browserVersion, chromiumSha256 }, null, 2) + '\n');
+  chromiumVersion: browser.browserVersion, chromiumSha256, chromiumArchiveSha256: manifest.archiveSha256 }, null, 2) + '\n');
 console.log(`Prepared Node ${nodeVersion} and Chromium ${browser.browserVersion} (revision ${browser.revision}).`);
