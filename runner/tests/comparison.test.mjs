@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compareFindings, comparisonKey } from '../comparison.mjs';
+import { presentableFindings } from '../matching.mjs';
 
 test('does not claim resolution when coverage is partial', () => {
-  const before = { comparisonKey: 'same', status: 'completed', normalizedCoverage: { status: 'partial' }, normalizedFindings: [{ findingId: 'a' }, { findingId: 'b' }] };
+  const before = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' }, normalizedFindings: [{ findingId: 'a' }, { findingId: 'b' }] };
   const after = { ...before, normalizedFindings: [{ findingId: 'a' }, { findingId: 'c' }] };
   assert.deepEqual(compareFindings(before, after), { comparable: true, findings: [
     { findingId: 'a', status: 'still-present' }, { findingId: 'b', status: 'unverified' }, { findingId: 'c', status: 'unverified' }
@@ -24,10 +25,30 @@ test('rejects incompatible or missing comparison keys', () => {
 });
 
 test('even complete coverage does not resolve a potentially moved element', () => {
-  const before = { comparisonKey: 'same', status: 'completed', normalizedCoverage: { status: 'complete' }, normalizedFindings: [{ findingId: 'a' }] };
+  const before = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'complete' }, normalizedFindings: [{ findingId: 'a' }] };
   const after = { ...before, normalizedFindings: [{ findingId: 'b' }] };
   assert.deepEqual(compareFindings(before, after).findings, [
     { findingId: 'a', status: 'unverified' }, { findingId: 'b', status: 'unverified' }
   ]);
   assert.equal(compareFindings(before, { ...after, normalizedFindings: [{ findingId: 'b' }, { findingId: 'b' }] }).comparable, false);
+});
+
+test('incomplete, mixed-version and malformed reports are not comparable', () => {
+  const before = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' }, normalizedFindings: [{ findingId: 'a' }] };
+  assert.equal(compareFindings(before, { ...before, status: 'incomplete' }).comparable, false);
+  assert.equal(compareFindings(before, { ...before, normalizedSchemaVersion: '0.1' }).comparable, false);
+  assert.equal(compareFindings(before, { ...before, normalizedFindings: [null] }).comparable, false);
+  assert.equal(compareFindings(before, { ...before, normalizedCoverage: null }).comparable, false);
+});
+
+test('presentable findings accept unknown rule IDs but reject foreign or unsafe evidence', () => {
+  const report = { runId: 'run', normalizedSchemaVersion: '0.2', normalizedFindings: [{ findingId: 'f', ruleId: 'future:rule', observations: [
+    { observationId: 'o', runId: 'run', scenarioId: 's', viewportId: 'v', source: 'future', evidence: { screenshot: 'run-1-1.png' } }
+  ] }] };
+  assert.equal(presentableFindings(report).length, 1);
+  assert.equal(presentableFindings({ ...report, normalizedFindings: [null] }), null);
+  const otherRun = structuredClone(report); otherRun.normalizedFindings[0].observations[0].runId = 'other';
+  assert.equal(presentableFindings(otherRun), null);
+  const traversal = structuredClone(report); traversal.normalizedFindings[0].observations[0].evidence.screenshot = '../secret.png';
+  assert.equal(presentableFindings(traversal), null);
 });

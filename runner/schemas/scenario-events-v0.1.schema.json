@@ -18,10 +18,29 @@
           "viewportId": { "type": "string", "pattern": "\\S" }, "stepId": { "type": "string", "pattern": "^[1-9][0-9]*$" },
           "stepType": { "type": "string", "pattern": "\\S" }, "phase": { "enum": ["before", "action", "after", "error"] },
           "at": { "type": "string", "format": "date-time" },
-          "screenshot": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,160}\\.png$" }] }
+          "screenshot": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,160}\\.png$" }] },
+          "domSummary": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/domSummary" }] }
         },
         "allOf": [{ "if": { "properties": { "phase": { "const": "error" } }, "required": ["phase"] },
-          "then": { "required": ["screenshot"] }, "else": { "not": { "required": ["screenshot"] } } }]
+          "then": { "required": ["screenshot"] }, "else": { "not": { "anyOf": [{ "required": ["screenshot"] }, { "required": ["domSummary"] }] } } }]
+      }
+    }
+  },
+  "$defs": {
+    "count": { "type": "integer", "minimum": 0, "maximum": 5000 },
+    "domSummary": {
+      "type": "object", "additionalProperties": false, "required": ["capturedAt", "viewport", "visible", "coverage"],
+      "properties": {
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "viewport": { "type": "object", "additionalProperties": false, "required": ["width", "height", "deviceScaleFactor", "scrollX", "scrollY"],
+          "properties": { "width": { "type": "number", "exclusiveMinimum": 0 }, "height": { "type": "number", "exclusiveMinimum": 0 },
+            "deviceScaleFactor": { "type": "number", "exclusiveMinimum": 0 }, "scrollX": { "type": "number" }, "scrollY": { "type": "number" } } },
+        "visible": { "type": "object", "additionalProperties": false, "required": ["elements", "interactive", "headings", "dialogs", "forms"],
+          "properties": { "elements": { "$ref": "#/$defs/count" }, "interactive": { "$ref": "#/$defs/count" }, "headings": { "$ref": "#/$defs/count" },
+            "dialogs": { "$ref": "#/$defs/count" }, "forms": { "$ref": "#/$defs/count" } } },
+        "coverage": { "type": "object", "additionalProperties": false, "required": ["status", "truncated", "elementsSeen", "iframes", "canvases", "openShadowRoots"],
+          "properties": { "status": { "const": "partial" }, "truncated": { "type": "boolean" }, "elementsSeen": { "$ref": "#/$defs/count" },
+            "iframes": { "$ref": "#/$defs/count" }, "canvases": { "$ref": "#/$defs/count" }, "openShadowRoots": { "$ref": "#/$defs/count" } } }
       }
     }
   }

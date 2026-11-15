@@ -13,6 +13,7 @@ import { screenshotWithRedaction } from './screenshot.mjs';
 import { startGuardProxy } from './guard-proxy.mjs';
 import { writeArtifactManifest } from './artifacts.mjs';
 import { stepEvent, validateScenarioEvents } from './events.mjs';
+import { collectDomSummary } from './dom-summary.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -186,6 +187,23 @@ async function executeAudit(raw) {
                     if (!outsideOrigin) report.warnings.push(`Скриншот ошибки ${scenario.title}/${viewportLabel}: ${String(captureError.message || captureError).slice(0, 140)}`);
                   }
                 }
+                let domSummary = null;
+                if (!outsideOrigin) {
+                  try {
+                    assertCurrentOrigin();
+                    const summary = await collectDomSummary(page);
+                    assertCurrentOrigin();
+                    domSummary = summary;
+                  } catch {
+                    if (!outsideOrigin) report.warnings.push(`Не удалось получить структурную сводку DOM: ${scenario.title}/${viewportLabel}`);
+                  }
+                }
+                if (!outsideOrigin) { try { assertCurrentOrigin(); } catch { /* incident recorded above */ } }
+                if (outsideOrigin && errorScreenshot) {
+                  await fs.unlink(path.join(screenshots, errorScreenshot)).catch(() => {});
+                  errorScreenshot = null;
+                  domSummary = null;
+                }
                 if (!outsideOrigin) {
                   const observation = failedStepObservation({ pageUrl: page.url(), scenario, step, stepIndex: i, runId,
                     scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`) });
@@ -195,7 +213,7 @@ async function executeAudit(raw) {
                   }
                 }
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs, error: message, screenshot: errorScreenshot });
-                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot }));
+                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot, domSummary }));
                 result.status = 'failed';
                 if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',

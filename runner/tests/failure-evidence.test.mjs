@@ -27,6 +27,8 @@ test('a failed step has its own screenshot instead of the final run screenshot',
     assert.equal(report.scenarioEventsVersion, '0.1');
     assert.deepEqual(report.scenarioEvents.map(event => event.phase), ['before', 'action', 'error']);
     assert.equal(report.scenarioEvents.at(-1).screenshot, result.steps[0].screenshot);
+    assert.ok(report.scenarioEvents.at(-1).domSummary);
+    assert.equal(report.scenarioEvents.at(-1).domSummary.viewport.width, 390);
     assert.equal(new Set(report.scenarioEvents.map(event => event.eventId)).size, 3);
     for (const filename of [result.screenshot, result.steps[0].screenshot]) assert.ok((await fs.stat(path.join(dir, 'screenshots', filename))).size > 100);
     assert.equal(report.artifactManifest, 'artifacts.json');
