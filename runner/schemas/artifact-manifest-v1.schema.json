@@ -11,7 +11,7 @@
       "items": {
         "type": "object", "required": ["path", "sha256", "bytes"],
         "properties": {
-          "path": { "type": "string", "pattern": "^(report\\.json|report\\.html|screenshots/[a-zA-Z0-9_-]{1,160}\\.png)$" },
+          "path": { "type": "string", "pattern": "^(report\\.json|report\\.html|screenshots/[a-zA-Z0-9_-]{1,160}\\.png|traces/trace-[1-9][0-9]*-[1-9][0-9]*\\.zip)$" },
           "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "bytes": { "type": "integer", "minimum": 0 }
         }
       }

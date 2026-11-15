@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { isResolvedInside } from './policy.mjs';
 
 const validPath = value => value === 'report.json' || value === 'report.html' ||
-  (typeof value === 'string' && /^screenshots\/[a-zA-Z0-9_-]{1,160}\.png$/.test(value));
+  (typeof value === 'string' && (/^screenshots\/[a-zA-Z0-9_-]{1,160}\.png$/.test(value) || /^traces\/trace-[1-9]\d*-[1-9]\d*\.zip$/.test(value)));
 
 export async function writeArtifactManifest(outputDir, runId, relativePaths) {
   if (typeof runId !== 'string' || !runId || !Array.isArray(relativePaths) || relativePaths.some(value => !validPath(value))) {

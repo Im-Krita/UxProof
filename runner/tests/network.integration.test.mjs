@@ -91,11 +91,12 @@ test('a cross-origin redirect stops subsequent scripted actions', async () => {
   try {
     const report = await runAudit({ runId: 'cross-origin-test', outputDir: dir, project: 'test', baseUrl: `http://127.0.0.1:${origin.address().port}/`,
       scenarios: [{ id: 's', title: 'redirect', steps: [{ type: 'click', name: 'action', target: 'css:#action' }] }],
-      viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } });
+      viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false, trace: 'on-failure' } });
     assert.ok(targetHits > 0, 'fixture proves the redirect reached the other origin before detection');
     assert.equal(report.results[0].status, 'failed');
     assert.equal(report.status, 'incomplete');
     assert.equal(report.results[0].screenshot, null);
+    assert.equal(report.results[0].trace, undefined);
     assert.equal(actionHits, 0);
     assert.ok(report.warnings.some(warning => /после загрузки/.test(warning)));
   } finally {

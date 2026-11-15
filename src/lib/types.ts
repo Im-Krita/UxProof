@@ -2,9 +2,9 @@ export type StepType = 'click' | 'fill' | 'select' | 'check' | 'navigate' | 'exp
 export interface AuditStep { type:StepType; name:string; target:string; value:string }
 export interface Scenario { id:string; title:string; description:string; steps:AuditStep[] }
 export interface Viewport { id:string; label:string; width:number; height:number }
-export interface AuditConfig { project:string; baseUrl:string; scenarios:Scenario[]; viewports:Viewport[]; options:{enableAI:boolean;aiProvider:'openai'|'ollama';disabledRules?:string[]} }
+export interface AuditConfig { project:string; baseUrl:string; scenarios:Scenario[]; viewports:Viewport[]; options:{enableAI:boolean;aiProvider:'openai'|'ollama';disabledRules?:string[];trace?:'off'|'on-failure'} }
 export interface StepResult { index:number; name:string; type:StepType; status:'passed'|'failed'; durationMs:number; error?:string; screenshot?:string|null }
-export interface FlowResult { id:string; scenario:string; viewport:string; width:number; height:number; status:'passed'|'failed'; passedSteps:number; totalSteps:number; steps:StepResult[]; screenshot:string|null; durationMs:number }
+export interface FlowResult { id:string; scenario:string; viewport:string; width:number; height:number; status:'passed'|'failed'; passedSteps:number; totalSteps:number; steps:StepResult[]; screenshot:string|null; trace?:string; durationMs:number }
 export interface Issue { id:string; kind:string; status:'confirmed'|'recommendation'|'observation'; severity:'high'|'medium'|'low'; title:string; description:string; scenario:string; viewport:string; screenshot:string|null; reproduction?:string; step?:number|null; ruleId?:string; helpUrl?:string }
 export interface DomSummary { capturedAt:string; viewport:{width:number;height:number;deviceScaleFactor:number;scrollX:number;scrollY:number}; visible:{elements:number;interactive:number;headings:number;dialogs:number;forms:number}; coverage:{status:'partial';truncated:boolean;elementsSeen:number;iframes:number;canvases:number;openShadowRoots:number} }
 export interface NormalizedObservation { observationId:string;runId:string;scenarioId:string;viewportId:string;source:string;stepId?:string;evidence?:{screenshot:string} }

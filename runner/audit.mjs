@@ -71,7 +71,7 @@ async function executeAudit(raw) {
   const report = {
     version: 1, runId, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
-    options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai', ...(config.options?.disabledRules ? { disabledRules: config.options.disabledRules } : {}) },
+    options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai', ...(config.options?.disabledRules ? { disabledRules: config.options.disabledRules } : {}), ...(config.options?.trace === 'on-failure' ? { trace: 'on-failure' } : {}) },
     summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas, видео и совпадения значений fill/expectValue в тексте; другие данные и видимый текст могут содержать личную информацию.'],
     normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' },
     scenarioEventsVersion: '0.1', scenarioEvents: []
@@ -80,6 +80,8 @@ async function executeAudit(raw) {
   let browser;
   let proxy;
   let aiCalls = 0;
+  let traceBytes = 0;
+  if (config.options?.trace === 'on-failure') report.warnings.push('Trace включён: ZIP-файлы могут содержать данные страницы, значения полей и сетевые сведения; храните и передавайте их осторожно.');
   const blockedNotes = new Set();
   const recordBlocked = message => {
     const note = String(message || '').slice(0, 160);
@@ -113,7 +115,7 @@ async function executeAudit(raw) {
         const runStart = Date.now();
         const issueStart = report.issues.length;
         const observationStart = observations.length;
-        let context;
+        let context, tracingStarted = false, outsideOrigin = false;
         try {
           context = await browser.newContext({
             viewport: { width: vp.width, height: vp.height },
@@ -122,11 +124,14 @@ async function executeAudit(raw) {
             reducedMotion: 'reduce',
             serviceWorkers: 'block'
           });
+          if (config.options?.trace === 'on-failure') {
+            try { await context.tracing.start({ screenshots: true, snapshots: true, sources: false }); tracingStarted = true; }
+            catch { report.warnings.push(`Не удалось начать trace: ${scenario.title}/${viewportLabel}`); }
+          }
           const page = await context.newPage();
           page.setDefaultTimeout(8000);
           page.setDefaultNavigationTimeout(15000);
           let pageErrorCount = 0;
-          let outsideOrigin = false;
           let navigationLoaded = false;
           const recordOutsideOrigin = message => {
             if (outsideOrigin) return;
@@ -361,6 +366,27 @@ async function executeAudit(raw) {
           report.results.push(result);
           report.warnings.push(`Сбой браузера ${scenario.title}/${viewportLabel}: ${String(error.message || error).slice(0, 180)}`);
         } finally {
+          if (context && tracingStarted) {
+            const relative = `traces/trace-${sIdx + 1}-${vIdx + 1}.zip`;
+            const tracePath = path.join(outputDir, ...relative.split('/'));
+            try {
+              if (result.status === 'failed' && !outsideOrigin && traceBytes < 100 * 1024 * 1024) {
+                await fs.mkdir(path.dirname(tracePath), { recursive: true });
+                await context.tracing.stop({ path: tracePath });
+                const { size } = await fs.stat(tracePath);
+                if (size > 20 * 1024 * 1024 || traceBytes + size > 100 * 1024 * 1024) {
+                  await fs.unlink(tracePath);
+                  report.warnings.push(`Trace превышает лимит размера: ${scenario.title}/${viewportLabel}`);
+                } else { traceBytes += size; result.trace = relative; }
+              } else {
+                await context.tracing.stop();
+                if (result.status === 'failed' && !outsideOrigin) report.warnings.push(`Trace пропущен: достигнут общий лимит размера`);
+              }
+            } catch {
+              await fs.unlink(tracePath).catch(() => {});
+              report.warnings.push(`Не удалось сохранить trace: ${scenario.title}/${viewportLabel}`);
+            }
+          }
           if (context) await context.close().catch(() => {});
         }
       }
@@ -393,7 +419,7 @@ async function executeAudit(raw) {
     ...report.normalizedFindings.flatMap(finding => finding.observations.map(observation => observation.evidence?.screenshot))
   ].filter(name => typeof name === 'string' && name);
   try {
-    await writeArtifactManifest(outputDir, runId, ['report.json', 'report.html', ...screenshotNames.map(name => `screenshots/${name}`)]);
+    await writeArtifactManifest(outputDir, runId, ['report.json', 'report.html', ...screenshotNames.map(name => `screenshots/${name}`), ...report.results.map(result => result.trace).filter(Boolean)]);
   } catch (error) {
     report.status = 'incomplete';
     delete report.artifactManifest;

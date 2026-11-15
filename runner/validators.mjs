@@ -15,6 +15,7 @@ const fail = message => { throw new InputError(message); };
 export function validateConfig(config) {
   if (!config || typeof config !== 'object') fail('Не задана конфигурация');
   try { validateDisabledRules(config.options?.disabledRules); } catch { fail('Некорректный список отключённых правил'); }
+  if (config.options?.trace !== undefined && !['off', 'on-failure'].includes(config.options.trace)) fail('Некорректный режим trace');
   const parsed = (() => { try { return assertBaseUrlShape(config.baseUrl); } catch (error) { fail(error.message); } })();
   if (typeof config.project === 'string' && config.project.length > 200) fail('Слишком длинное название проекта');
   if (!Array.isArray(config.scenarios) || config.scenarios.length < 1 || config.scenarios.length > 10) fail('Нужно от 1 до 10 сценариев');
