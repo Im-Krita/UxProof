@@ -7,6 +7,8 @@ const report = () => ({ runId: 'r', scenarioEventsVersion: '0.1', results: [{ id
 
 test('validates event sequence and accepts old reports without events', () => {
   assert.equal(validateScenarioEvents(report()), true);
+  const legacy = report(); legacy.scenarioEvents[2].pageScope = 'http://localhost/';
+  assert.equal(validateScenarioEvents(legacy), true);
   assert.equal(validateScenarioEvents({ version: 1 }), true);
 });
 
@@ -20,6 +22,9 @@ test('rejects inconsistent event IDs, phases, result links and screenshots', () 
     r => { r.scenarioEvents[0].domSummary = { leakedText: 'secret' }; },
     r => { r.scenarioEvents[0].pageScope = 'http://localhost/'; },
     r => { r.scenarioEvents[2].pageScope = 'http://localhost/?token=secret'; },
+    r => { r.scenarioEvents[0].pageScopeId = `scope-${'a'.repeat(64)}`; },
+    r => { r.scenarioEvents[2].pageScopeId = 'not-a-hash'; },
+    r => { r.baseUrl = 'http://localhost/'; r.baseScopeId = `scope-${'a'.repeat(64)}`; },
     r => { r.scenarioEvents[0].elementGeometry = {}; },
     r => { r.scenarioEvents[2].elementGeometry = { leakedText: 'secret' }; },
     r => { r.scenarioEvents[2].domSummary = { leakedText: 'secret' }; },

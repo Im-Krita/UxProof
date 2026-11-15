@@ -6,7 +6,7 @@ import { executeStep, validateConfig, evidenceType } from './validators.mjs';
 import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
 import { assertRequestAllowed, prepareBasePolicy } from './policy.mjs';
-import { axeObservations, failedStepObservation, groupObservations } from './findings.mjs';
+import { axeObservations, failedStepObservation, groupObservations, scopeIdentifier } from './findings.mjs';
 import { comparisonKey, comparisonProfileKey } from './comparison.mjs';
 import { validateNormalizedReport } from './report-contract.mjs';
 import { screenshotWithRedaction } from './screenshot.mjs';
@@ -17,7 +17,6 @@ import { collectDomSummary } from './dom-summary.mjs';
 import { collectElementGeometry, sameElementGeometry } from './element-geometry.mjs';
 import { viewportOverflow, enabledRule } from './rules.mjs';
 import { collectDuplicateHeadings } from './copy-headings.mjs';
-import { pageScope } from './matching.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -70,7 +69,7 @@ async function executeAudit(raw) {
   const start = Date.now();
   const deadline = start + maxDurationMs();
   const report = {
-    version: 1, runId, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
+    version: 1, runId, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), baseScopeId: scopeIdentifier(config.baseUrl), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai', ...(config.options?.disabledRules ? { disabledRules: config.options.disabledRules } : {}), ...(config.options?.trace === 'on-failure' ? { trace: 'on-failure' } : {}) },
     summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas, видео и совпадения значений fill/expectValue в тексте; другие данные и видимый текст могут содержать личную информацию.'],
@@ -186,8 +185,8 @@ async function executeAudit(raw) {
                 report.scenarioEvents.push(stepEvent(eventBase, 'action'));
                 await executeStep(page, step, config.baseUrl);
                 assertCurrentOrigin();
-                const scope = pageScope(page.url());
-                report.scenarioEvents.push(stepEvent(eventBase, 'after', scope ? { pageScope: scope } : {}));
+                const scope = scopeIdentifier(page.url());
+                report.scenarioEvents.push(stepEvent(eventBase, 'after', scope ? { pageScopeId: scope } : {}));
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'passed', durationMs: Date.now() - stamp });
                 result.passedSteps++;
               } catch (error) {
@@ -245,8 +244,8 @@ async function executeAudit(raw) {
                   }
                 }
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs, error: message, screenshot: errorScreenshot });
-                const scope = outsideOrigin ? null : pageScope(page.url());
-                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot, domSummary, elementGeometry, ...(scope ? { pageScope: scope } : {}) }));
+                const scope = outsideOrigin ? null : scopeIdentifier(page.url());
+                report.scenarioEvents.push(stepEvent(eventBase, 'error', { at: failedAt, screenshot: errorScreenshot, domSummary, elementGeometry, ...(scope ? { pageScopeId: scope } : {}) }));
                 result.status = 'failed';
                 if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',

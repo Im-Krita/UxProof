@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { validateDomSummary } from './dom-summary.mjs';
 import { validateElementGeometry } from './element-geometry.mjs';
 import { pageScope } from './matching.mjs';
+import { scopeIdentifier } from './findings.mjs';
 
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const fail = () => { throw new TypeError('Invalid scenario event sequence'); };
@@ -15,6 +16,7 @@ export function validateScenarioEvents(report) {
   if (!report || typeof report !== 'object') fail();
   if (report.scenarioEventsVersion === undefined) return true;
   if (report.scenarioEventsVersion !== '0.1' || !nonempty(report.runId) || !Array.isArray(report.results) || !Array.isArray(report.scenarioEvents)) fail();
+  if (report.baseScopeId !== undefined && (!/^scope-[a-f0-9]{64}$/.test(report.baseScopeId) || scopeIdentifier(report.baseUrl) !== report.baseScopeId)) fail();
   const expected = new Map(), groups = new Map(), eventIds = new Set(), resultIds = new Set();
   for (const result of report.results) {
     if (!nonempty(result?.id) || resultIds.has(result.id) || !Array.isArray(result.steps)) fail();
@@ -35,6 +37,7 @@ export function validateScenarioEvents(report) {
     const step = expected.get(key);
     if (!step || step.type !== event.stepType) fail();
     if (event.pageScope !== undefined && (!['after', 'error'].includes(event.phase) || pageScope(event.pageScope) !== event.pageScope)) fail();
+    if (event.pageScopeId !== undefined && (!['after', 'error'].includes(event.phase) || !/^scope-[a-f0-9]{64}$/.test(event.pageScopeId))) fail();
     if (event.phase === 'error') {
       if (event.screenshot !== (step.screenshot ?? null) ||
           (event.screenshot !== null && !/^[a-zA-Z0-9_-]{1,160}\.png$/.test(event.screenshot))) fail();

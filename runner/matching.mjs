@@ -113,7 +113,10 @@ function stepEvidence(before, after, finding, mappedPaths) {
     const newEvent = inspect(after, observation, 'passed');
     if (!newEvent) continue;
     passed++;
-    if (targetScope && oldEvent.pageScope === finding.anchor[0] && newEvent.pageScope === targetScope) samePagePassed++;
+    const validId = id => typeof id === 'string' && /^scope-[a-f0-9]{64}$/.test(id);
+    if (targetScope && validId(oldEvent.pageScopeId) && validId(newEvent.pageScopeId) &&
+        (mappedPaths ? validId(before.baseScopeId) && validId(after.baseScopeId) && oldEvent.pageScopeId === before.baseScopeId && newEvent.pageScopeId === after.baseScopeId
+          : oldEvent.pageScopeId === newEvent.pageScopeId)) samePagePassed++;
   }
   return { passed, total: unique.size, samePagePassed, targetScope };
 }

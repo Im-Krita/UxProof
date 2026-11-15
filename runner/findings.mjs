@@ -1,4 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { pageScope } from './matching.mjs';
+
+export function scopeIdentifier(value) {
+  const scope = pageScope(value);
+  return scope ? `scope-${createHash('sha256').update(scope).digest('hex')}` : null;
+}
 
 // Identity is based only on explicit rule and anchor evidence, never on run metadata.
 export function findingId({ ruleId, anchor }) {

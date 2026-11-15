@@ -104,18 +104,19 @@ test('step recheck counts only matching passed executions without claiming resol
 });
 
 test('resolves only a re-executed failed step on the same or explicitly mapped page', () => {
+  const initialScopeId = `scope-${'a'.repeat(64)}`, otherScopeId = `scope-${'b'.repeat(64)}`, fixedScopeId = `scope-${'c'.repeat(64)}`;
   const finding = { findingId: 'f', ruleId: 'playwright:step:expectVisible', anchor: ['http://example.test/', 'scenario:s', `definition:${'b'.repeat(64)}`, 'step:1'],
     observations: [{ runId: 'old', source: 'playwright', scenarioId: 's', viewportId: 'v', stepId: '1' }] };
   Object.assign(finding.observations[0], { ruleId: finding.ruleId, anchor: finding.anchor, classification: 'technical-fact', status: 'confirmed' });
   const base = { comparisonKey: 'same', comparisonProfileKey: 'profile', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' }, scenarioEventsVersion: '0.1' };
   const events = (runId, terminal, scope) => ['before', 'action', terminal].map(phase => ({ eventId: `${runId}-${phase}`, at: '2026-11-15T12:00:00.000Z', runId,
-    combinationId: '0-0', scenarioId: 's', viewportId: 'v', stepId: '1', stepType: 'expectVisible', phase, ...(phase === 'error' ? { screenshot: null } : {}), ...(['after', 'error'].includes(phase) && scope ? { pageScope: scope } : {}) }));
-  const before = { ...base, runId: 'old', baseUrl: 'http://example.test/', normalizedFindings: [finding], results: [{ id: '0-0', steps: [{ index: 1, type: 'expectVisible', status: 'failed' }] }], scenarioEvents: events('old', 'error', 'http://example.test/') };
-  const after = { ...base, runId: 'new', baseUrl: 'http://example.test/', normalizedFindings: [], results: [{ id: '0-0', steps: [{ index: 1, type: 'expectVisible', status: 'passed' }] }], scenarioEvents: events('new', 'after', 'http://example.test/') };
+    combinationId: '0-0', scenarioId: 's', viewportId: 'v', stepId: '1', stepType: 'expectVisible', phase, ...(phase === 'error' ? { screenshot: null } : {}), ...(['after', 'error'].includes(phase) && scope ? { pageScopeId: scope } : {}) }));
+  const before = { ...base, runId: 'old', baseUrl: 'http://example.test/', baseScopeId: initialScopeId, normalizedFindings: [finding], results: [{ id: '0-0', steps: [{ index: 1, type: 'expectVisible', status: 'failed' }] }], scenarioEvents: events('old', 'error', initialScopeId) };
+  const after = { ...base, runId: 'new', baseUrl: 'http://example.test/', baseScopeId: initialScopeId, normalizedFindings: [], results: [{ id: '0-0', steps: [{ index: 1, type: 'expectVisible', status: 'passed' }] }], scenarioEvents: events('new', 'after', initialScopeId) };
   assert.equal(compareFindings(before, after).findings[0].status, 'resolved');
-  const moved = structuredClone(after); moved.scenarioEvents[2].pageScope = 'http://example.test/other';
+  const moved = structuredClone(after); moved.scenarioEvents[2].pageScopeId = otherScopeId;
   assert.equal(compareFindings(before, moved).findings[0].status, 'unverified');
-  const historical = structuredClone(after); delete historical.scenarioEvents[2].pageScope;
+  const historical = structuredClone(after); delete historical.scenarioEvents[2].pageScopeId; historical.scenarioEvents[2].pageScope = 'http://example.test/';
   assert.equal(compareFindings(before, historical).findings[0].status, 'unverified');
   const broken = structuredClone(before); broken.scenarioEvents[1].eventId = broken.scenarioEvents[0].eventId;
   assert.equal(compareFindings(broken, after).findings[0].status, 'unverified');
@@ -124,7 +125,7 @@ test('resolves only a re-executed failed step on the same or explicitly mapped p
   const otherViewportFailed = structuredClone(after);
   otherViewportFailed.scenarioEvents.push({ ...otherViewportFailed.scenarioEvents[2], eventId: 'other-failure', viewportId: 'mobile', phase: 'error' });
   assert.equal(compareFindings(before, otherViewportFailed).findings[0].status, 'unverified');
-  const mapped = { ...after, comparisonKey: 'other', baseUrl: 'http://example.test/fixed', scenarioEvents: events('new', 'after', 'http://example.test/fixed') };
+  const mapped = { ...after, comparisonKey: 'other', baseUrl: 'http://example.test/fixed', baseScopeId: fixedScopeId, scenarioEvents: events('new', 'after', fixedScopeId) };
   assert.equal(compareFindings(before, mapped).comparable, false);
   assert.equal(compareFindings(before, mapped, { mapPaths: true }).findings[0].status, 'resolved');
 });

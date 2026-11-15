@@ -7,6 +7,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import { runAudit } from '../audit.mjs';
 import { compareFindings } from '../matching.mjs';
+import { scopeIdentifier } from '../findings.mjs';
 
 test('real step failure resolves only after passing on the explicitly mapped page', async () => {
   const server = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -24,8 +25,9 @@ test('real step failure resolves only after passing on the explicitly mapped pag
         viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } }));
     }
     const [before, after] = reports;
-    assert.equal(before.scenarioEvents.at(-1).pageScope, `${base}/broken`);
-    assert.equal(after.scenarioEvents.at(-1).pageScope, `${base}/fixed`);
+    assert.equal(before.scenarioEvents.at(-1).pageScopeId, scopeIdentifier(`${base}/broken`));
+    assert.equal(after.scenarioEvents.at(-1).pageScopeId, scopeIdentifier(`${base}/fixed`));
+    assert.ok(!JSON.stringify(before.scenarioEvents).includes('/broken'));
     const finding = before.normalizedFindings.find(item => item.ruleId === 'playwright:step:expectText');
     assert.ok(finding);
     assert.equal(compareFindings(before, after).comparable, false);

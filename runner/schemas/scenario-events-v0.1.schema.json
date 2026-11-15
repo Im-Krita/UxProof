@@ -6,6 +6,7 @@
   "required": ["runId", "scenarioEventsVersion", "scenarioEvents"],
   "properties": {
     "runId": { "type": "string", "pattern": "\\S" },
+    "baseScopeId": { "type": "string", "pattern": "^scope-[a-f0-9]{64}$" },
     "scenarioEventsVersion": { "const": "0.1" },
     "scenarioEvents": {
       "type": "array",
@@ -18,6 +19,7 @@
           "viewportId": { "type": "string", "pattern": "\\S" }, "stepId": { "type": "string", "pattern": "^[1-9][0-9]*$" },
           "stepType": { "type": "string", "pattern": "\\S" }, "phase": { "enum": ["before", "action", "after", "error"] },
           "pageScope": { "type": "string", "pattern": "^https?://[^?#]+$" },
+          "pageScopeId": { "type": "string", "pattern": "^scope-[a-f0-9]{64}$" },
           "at": { "type": "string", "format": "date-time" },
           "screenshot": { "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,160}\\.png$" }] },
           "domSummary": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/domSummary" }] },
@@ -25,7 +27,7 @@
         },
         "allOf": [{ "if": { "properties": { "phase": { "const": "error" } }, "required": ["phase"] },
           "then": { "required": ["screenshot"], "allOf": [{ "if": { "properties": { "elementGeometry": { "type": "object" } }, "required": ["elementGeometry"] }, "then": { "properties": { "screenshot": { "type": "string" } } } }] }, "else": { "not": { "anyOf": [{ "required": ["screenshot"] }, { "required": ["domSummary"] }, { "required": ["elementGeometry"] }] } } },
-          { "if": { "properties": { "phase": { "enum": ["before", "action"] } }, "required": ["phase"] }, "then": { "not": { "required": ["pageScope"] } } }]
+          { "if": { "properties": { "phase": { "enum": ["before", "action"] } }, "required": ["phase"] }, "then": { "not": { "anyOf": [{ "required": ["pageScope"] }, { "required": ["pageScopeId"] }] } } }]
       }
     }
   },
