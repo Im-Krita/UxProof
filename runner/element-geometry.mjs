@@ -9,6 +9,12 @@ export function validateElementGeometry(value) {
     value.deviceScaleFactor > 0 && value.deviceScaleFactor <= 10);
 }
 
+// Reject a geometry-to-image association when layout or viewport changed around capture.
+export function sameElementGeometry(before, after) {
+  return validateElementGeometry(before) && validateElementGeometry(after) &&
+    fields.every(key => before[key] === after[key]);
+}
+
 // Geometry is viewport-relative in CSS pixels. No page text, selectors or values are stored.
 export async function collectElementGeometry(page, target, { timeoutMs = 2000 } = {}) {
   if (typeof target !== 'string' || !target || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10000) return null;

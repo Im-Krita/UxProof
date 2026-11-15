@@ -14,7 +14,7 @@ import { startGuardProxy } from './guard-proxy.mjs';
 import { writeArtifactManifest } from './artifacts.mjs';
 import { stepEvent, validateScenarioEvents } from './events.mjs';
 import { collectDomSummary } from './dom-summary.mjs';
-import { collectElementGeometry } from './element-geometry.mjs';
+import { collectElementGeometry, sameElementGeometry } from './element-geometry.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -186,9 +186,12 @@ async function executeAudit(raw) {
                 const message = String(error?.message || error).split('\n')[0].slice(0, 450);
                 let errorScreenshot = null;
                 let wroteErrorScreenshot = false;
+                let geometryBefore = null;
                 const errorFilename = `error-${sIdx + 1}-${vIdx + 1}-${i + 1}.png`;
                 if (!outsideOrigin) {
                   try {
+                    assertCurrentOrigin();
+                    if (step.target) geometryBefore = await collectElementGeometry(page, step.target);
                     assertCurrentOrigin();
                     await screenshotWithRedaction(page, { path: path.join(screenshots, errorFilename), fullPage: false, timeout: 8000 });
                     wroteErrorScreenshot = true;
@@ -201,8 +204,9 @@ async function executeAudit(raw) {
                 }
                 let domSummary = null;
                 let elementGeometry = null;
-                if (!outsideOrigin && errorScreenshot && step.target) {
-                  elementGeometry = await collectElementGeometry(page, step.target);
+                if (!outsideOrigin && errorScreenshot && geometryBefore && step.target) {
+                  const geometryAfter = await collectElementGeometry(page, step.target);
+                  if (sameElementGeometry(geometryBefore, geometryAfter)) elementGeometry = geometryAfter;
                   try { assertCurrentOrigin(); } catch { elementGeometry = null; }
                 }
                 if (!outsideOrigin) {
