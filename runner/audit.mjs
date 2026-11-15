@@ -15,7 +15,8 @@ import { writeArtifactManifest } from './artifacts.mjs';
 import { stepEvent, validateScenarioEvents } from './events.mjs';
 import { collectDomSummary } from './dom-summary.mjs';
 import { collectElementGeometry, sameElementGeometry } from './element-geometry.mjs';
-import { viewportOverflow } from './rules.mjs';
+import { viewportOverflow, enabledRule } from './rules.mjs';
+import { collectDuplicateHeadings } from './copy-headings.mjs';
 
 let runActive = false;
 let activeBrowser = null;
@@ -305,8 +306,29 @@ async function executeAudit(raw) {
               for (let index = issueStart; index < report.issues.length; index++) {
                 if (!report.issues[index].screenshot && !Number.isInteger(report.issues[index].step)) report.issues[index].screenshot = filename;
               }
+              if (navigationLoaded && enabledRule('copy:duplicate-heading', config.options?.disabledRules)) {
+                try {
+                  const copy = await collectDuplicateHeadings(page);
+                  assertCurrentOrigin();
+                  if (copy.truncated) report.warnings.push(`Проверка повторов ограничена 5000 элементами: ${scenario.title}/${viewportLabel}`);
+                  if (copy.duplicateGroups) report.issues.push({
+                    id: `COPY-${report.issues.length + 1}`, kind: 'copy', status: 'recommendation', severity: 'low',
+                    ruleId: 'copy:duplicate-heading', title: 'Возможно, повторяются заголовки',
+                    description: `В видимой области найдено повторяющихся групп: ${copy.duplicateGroups} (заголовков: ${copy.duplicateHeadings}). Проверьте контекст: повторение может быть необходимым.`,
+                    scenario: scenario.title, viewport: viewportLabel, screenshot: filename
+                  });
+                } catch {
+                  if (outsideOrigin) throw Error('Переход за пределы адреса проекта');
+                  report.warnings.push(`Не удалось проверить повторение заголовков: ${scenario.title}/${viewportLabel}`);
+                }
+              }
             } catch (error) {
-              if (wroteFinalScreenshot && outsideOrigin) await fs.unlink(path.join(screenshots, filename)).catch(() => {});
+              if (wroteFinalScreenshot && outsideOrigin) {
+                await fs.unlink(path.join(screenshots, filename)).catch(() => {});
+                result.screenshot = null;
+                for (let index = observationStart; index < observations.length; index++) if (observations[index].evidence?.screenshot === filename) delete observations[index].evidence;
+                for (let index = issueStart; index < report.issues.length; index++) if (report.issues[index].screenshot === filename) report.issues[index].screenshot = null;
+              }
               report.warnings.push(`Скриншот ${scenario.title}/${viewportLabel}: ${String(error.message || error).slice(0, 140)}`);
             }
             result.durationMs = Date.now() - runStart;
@@ -356,7 +378,8 @@ async function executeAudit(raw) {
     passedRuns: report.results.filter(item => item.status === 'passed').length,
     failedRuns: report.results.filter(item => item.status === 'failed').length,
     confirmedIssues: report.issues.filter(item => item.status === 'confirmed').length,
-    aiSuggestions: report.issues.filter(item => item.status === 'recommendation').length,
+    aiSuggestions: report.issues.filter(item => item.kind === 'ai-ux' && item.status === 'recommendation').length,
+    ruleSuggestions: report.issues.filter(item => item.kind !== 'ai-ux' && item.status === 'recommendation').length,
     accessibilityIssues: report.issues.filter(item => item.kind === 'accessibility').length
   };
   report.artifactManifest = 'artifacts.json';

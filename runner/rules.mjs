@@ -5,6 +5,9 @@ const stringList = (value, min = 0) => Array.isArray(value) && value.length >= m
 const keysAre = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 const ruleFields = ['ruleId', 'version', 'title', 'category', 'scope', 'requiredEvidence', 'trigger', 'exclusions', 'classification', 'remediation', 'fixtures', 'status'];
+const validTrigger = trigger => (keysAre(trigger, ['type', 'toleranceCssPx']) && trigger.type === 'viewport-overflow' &&
+  typeof trigger.toleranceCssPx === 'number' && Number.isFinite(trigger.toleranceCssPx) && trigger.toleranceCssPx >= 0 && trigger.toleranceCssPx <= 20) ||
+  (keysAre(trigger, ['type', 'minOccurrences']) && trigger.type === 'duplicate-headings' && trigger.minOccurrences === 2);
 
 export function validateRegistry(registry) {
   if (!keysAre(registry, ['schemaVersion', 'rules']) || registry.schemaVersion !== '0.1' || !Array.isArray(registry.rules) || !registry.rules.length) throw TypeError('Invalid rule registry');
@@ -13,9 +16,10 @@ export function validateRegistry(registry) {
     if (!keysAre(rule, ruleFields) || !/^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/.test(rule.ruleId || '') || ids.has(rule.ruleId) ||
         !/^\d+\.\d+\.\d+$/.test(rule.version || '') || ![rule.title, rule.category, rule.scope, rule.remediation].every(nonempty) ||
         !stringList(rule.requiredEvidence, 1) || !stringList(rule.exclusions) || !stringList(rule.fixtures, 1) ||
-        !keysAre(rule.trigger, ['type', 'toleranceCssPx']) || rule.trigger.type !== 'viewport-overflow' ||
-        typeof rule.trigger.toleranceCssPx !== 'number' || !Number.isFinite(rule.trigger.toleranceCssPx) || rule.trigger.toleranceCssPx < 0 || rule.trigger.toleranceCssPx > 20 ||
-        rule.classification !== 'technical-fact' || !['enabled', 'disabled'].includes(rule.status)) throw TypeError('Invalid rule');
+        !validTrigger(rule.trigger) || !['technical-fact', 'semantic-hypothesis'].includes(rule.classification) ||
+        (rule.trigger.type === 'viewport-overflow' && rule.classification !== 'technical-fact') ||
+        (rule.trigger.type === 'duplicate-headings' && rule.classification !== 'semantic-hypothesis') ||
+        !['enabled', 'disabled'].includes(rule.status)) throw TypeError('Invalid rule');
     ids.add(rule.ruleId);
   }
   return true;
@@ -31,10 +35,16 @@ export function validateDisabledRules(value) {
   return true;
 }
 
+export function enabledRule(ruleId, disabledRules = []) {
+  validateDisabledRules(disabledRules);
+  const rule = registry.rules.find(item => item.ruleId === ruleId);
+  return Boolean(rule && rule.status === 'enabled' && !disabledRules.includes(ruleId));
+}
+
 export function viewportOverflow(measurement, disabledRules = []) {
   validateDisabledRules(disabledRules);
   const rule = registry.rules.find(item => item.ruleId === 'layout:viewport-overflow');
-  if (!rule || rule.status !== 'enabled' || disabledRules.includes(rule.ruleId)) return null;
+  if (!rule || !enabledRule(rule.ruleId, disabledRules)) return null;
   const { actual, expected } = measurement || {};
   if (![actual, expected].every(value => typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 1e7)) return null;
   if (actual <= expected + rule.trigger.toleranceCssPx) return null;

@@ -26,6 +26,7 @@
       "../runner/cli.mjs": "runner/cli.mjs",
       "../runner/comparison.mjs": "runner/comparison.mjs",
       "../runner/dom-summary.mjs": "runner/dom-summary.mjs",
+      "../runner/copy-headings.mjs": "runner/copy-headings.mjs",
       "../runner/element-geometry.mjs": "runner/element-geometry.mjs",
       "../runner/events.mjs": "runner/events.mjs",
       "../runner/rules.mjs": "runner/rules.mjs",

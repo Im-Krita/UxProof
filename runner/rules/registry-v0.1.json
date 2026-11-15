@@ -14,6 +14,20 @@
       "remediation": "Проверить элементы, выходящие за ширину окна, и оправданность горизонтальной прокрутки.",
       "fixtures": ["viewport-overflow", "viewport-fits"],
       "status": "enabled"
+    },
+    {
+      "ruleId": "copy:duplicate-heading",
+      "version": "1.0.0",
+      "title": "Возможно, повторяются заголовки",
+      "category": "copy",
+      "scope": "viewport",
+      "requiredEvidence": ["visibleHeadingText", "viewportScreenshot"],
+      "trigger": { "type": "duplicate-headings", "minOccurrences": 2 },
+      "exclusions": ["hidden-headings", "outside-viewport", "short-or-long-text"],
+      "classification": "semantic-hypothesis",
+      "remediation": "Проверить контекст повторения вручную; одинаковые заголовки могут быть необходимы.",
+      "fixtures": ["duplicate-visible-headings", "unique-visible-headings", "hidden-duplicate"],
+      "status": "enabled"
     }
   ]
 }
