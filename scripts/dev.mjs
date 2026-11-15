@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-const commands = [['API', process.execPath, ['runner/dev-server.mjs']], ['VITE', npm, ['run', 'dev:ui']]];
+const vite = fileURLToPath(new URL('../node_modules/vite/bin/vite.js', import.meta.url));
+const commands = [['API', process.execPath, ['runner/dev-server.mjs']], ['VITE', process.execPath, [vite, '--host', '127.0.0.1']]];
 const processes = [];
 let stopping = false;
 
@@ -20,6 +21,9 @@ function stopAll() {
 
 for (const [name, command, args] of commands) {
   const child = spawn(command, args, { stdio: 'inherit', windowsHide: false });
+  child.on('error', error => {
+    if (!stopping) { console.error(`${name}: ${error.message}`); process.exitCode = 1; stopAll(); }
+  });
   child.on('exit', code => {
     if (!stopping && code && code !== 0) {
       console.error(`${name} завершился с кодом ${code}`);
