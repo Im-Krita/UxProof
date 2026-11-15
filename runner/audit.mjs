@@ -6,7 +6,7 @@ import { executeStep, safeName, validateConfig, evidenceType } from './validator
 import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
 import { assertAuditableUrl, assertRequestAllowed, baseTargetsLoopback } from './policy.mjs';
-import { axeObservations, groupObservations } from './findings.mjs';
+import { axeObservations, failedStepObservation, groupObservations } from './findings.mjs';
 import { comparisonKey } from './comparison.mjs';
 import { validateNormalizedReport } from './report-contract.mjs';
 
@@ -66,7 +66,7 @@ async function executeAudit(raw) {
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
     summary: {}, results: [], issues: [], warnings: [],
-    normalizedSchemaVersion: '0.1', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe'], note: 'Only axe nodes with explicit selectors are included.' }
+    normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' }
   };
   const observations = [];
   let browser;
@@ -132,6 +132,9 @@ async function executeAudit(raw) {
                 result.passedSteps++;
               } catch (error) {
                 const message = String(error?.message || error).split('\n')[0].slice(0, 450);
+                const observation = failedStepObservation({ pageUrl: page.url(), scenario, step, stepIndex: i, runId,
+                  scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`) });
+                if (observation) observations.push(observation);
                 result.steps.push({ index: i + 1, name, type: step.type, status: 'failed', durationMs: Date.now() - stamp, error: message });
                 result.status = 'failed';
                 report.issues.push({

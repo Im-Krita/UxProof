@@ -7,7 +7,7 @@ const fail = () => { throw new TypeError('Invalid normalized report'); };
 export function validateNormalizedReport(report) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) fail();
   if (report.normalizedSchemaVersion === undefined) return true;
-  if (report.normalizedSchemaVersion !== '0.1' || !nonempty(report.runId) ||
+  if (!['0.1', '0.2'].includes(report.normalizedSchemaVersion) || !nonempty(report.runId) ||
       report.normalizedCoverage?.status !== 'partial' ||
       !Array.isArray(report.normalizedCoverage.sources) || !report.normalizedCoverage.sources.every(nonempty) ||
       !Array.isArray(report.normalizedFindings)) fail();
@@ -19,8 +19,12 @@ export function validateNormalizedReport(report) {
     for (const observation of finding.observations) {
       if (!observation || !nonempty(observation.observationId) || seenObservations.has(observation.observationId) ||
           observation.runId !== report.runId || !nonempty(observation.scenarioId) || !nonempty(observation.viewportId) ||
-          observation.ruleId !== finding.ruleId || findingId(observation) !== finding.findingId ||
-          observation.source !== 'axe' || observation.classification !== 'rule-violation' || observation.status !== 'confirmed') fail();
+          observation.ruleId !== finding.ruleId || findingId(observation) !== finding.findingId || observation.status !== 'confirmed') fail();
+      const axe = observation.source === 'axe' && observation.classification === 'rule-violation' && observation.ruleId.startsWith('axe:');
+      const step = report.normalizedSchemaVersion === '0.2' && observation.source === 'playwright' &&
+        observation.classification === 'technical-fact' && observation.ruleId.startsWith('playwright:step:') &&
+        typeof observation.stepId === 'string' && /^[1-9]\d*$/.test(observation.stepId);
+      if ((!axe && !step) || !report.normalizedCoverage.sources.includes(observation.source)) fail();
       if (observation.evidence !== undefined && (!observation.evidence || typeof observation.evidence !== 'object' ||
           !/^[a-zA-Z0-9_-]{1,160}\.png$/.test(observation.evidence.screenshot))) fail();
       seenObservations.add(observation.observationId);

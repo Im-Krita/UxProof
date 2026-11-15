@@ -38,3 +38,16 @@ export function axeObservations({ violation, pageUrl, scenarioId, viewportId, ru
       classification: 'rule-violation', status: 'confirmed' }];
   });
 }
+
+export function failedStepObservation({ pageUrl, scenario, step, stepIndex, scenarioId, viewportId, runId }) {
+  let url;
+  try { url = new URL(pageUrl); } catch { return null; }
+  if (!['http:', 'https:'].includes(url.protocol) || !Array.isArray(scenario?.steps) ||
+      !Number.isInteger(stepIndex) || stepIndex < 0 || !step?.type) return null;
+  const definition = scenario.steps.map(item => [String(item.type || ''), String(item.target || ''), String(item.value ?? '')]);
+  const scenarioFingerprint = createHash('sha256').update(JSON.stringify(definition)).digest('hex');
+  return { observationId: randomUUID(), runId, scenarioId, viewportId, stepId: String(stepIndex + 1),
+    ruleId: `playwright:step:${step.type}`,
+    anchor: [`${url.origin}${url.pathname}`, `scenario:${scenarioId}`, `definition:${scenarioFingerprint}`, `step:${stepIndex + 1}`],
+    source: 'playwright', classification: 'technical-fact', status: 'confirmed' };
+}

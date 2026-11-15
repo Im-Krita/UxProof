@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findingId, groupObservations, axeObservations } from '../findings.mjs';
+import { findingId, groupObservations, axeObservations, failedStepObservation } from '../findings.mjs';
 
 test('finding ID is stable across runs and viewport observations', () => {
   const a = { ruleId: 'axe:color-contrast', anchor: ['.warning'], runId: 'a', viewport: 'mobile' };
@@ -39,4 +39,18 @@ test('axe observations represent individual nodes and exclude URL query data', (
   const again = axeObservations({ ...input, runId: 'another', viewportId: 'other' });
   assert.equal(findingId(observations[0]), findingId(again[0]));
   assert.equal(axeObservations({ ...input, violation: { id: 'x', nodes: [{ target: [] }] } }).length, 0);
+});
+
+test('failed step identity distinguishes scenarios and expectations without exposing values', () => {
+  const step = { type: 'expectText', target: 'css:#status', value: 'private-expected-value' };
+  const input = { pageUrl: 'https://example.test/page?token=secret', scenario: { id: 's', steps: [step] }, step, stepIndex: 0, scenarioId: 's', viewportId: 'mobile', runId: 'one' };
+  const a = failedStepObservation(input);
+  const b = failedStepObservation({ ...input, runId: 'two', viewportId: 'desktop' });
+  assert.equal(findingId(a), findingId(b));
+  assert.notEqual(a.observationId, b.observationId);
+  assert.ok(!JSON.stringify(a).includes('private-expected-value'));
+  assert.ok(!JSON.stringify(a).includes('secret'));
+  const changed = { ...step, value: 'another value' };
+  assert.notEqual(findingId(a), findingId(failedStepObservation({ ...input, step: changed, scenario: { ...input.scenario, steps: [changed] } })));
+  assert.equal(failedStepObservation({ ...input, pageUrl: 'about:blank' }), null);
 });

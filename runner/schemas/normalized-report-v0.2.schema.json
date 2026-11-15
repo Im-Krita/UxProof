@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://uxproof.local/schemas/normalized-report-v0.2.schema.json",
+  "title": "UXProof normalized report extension v0.2",
+  "type": "object",
+  "required": ["runId", "normalizedSchemaVersion", "normalizedCoverage", "normalizedFindings"],
+  "properties": {
+    "runId": { "type": "string", "pattern": "\\S" },
+    "normalizedSchemaVersion": { "const": "0.2" },
+    "normalizedCoverage": {
+      "type": "object", "required": ["status", "sources"],
+      "properties": { "status": { "const": "partial" }, "sources": { "type": "array", "items": { "type": "string", "pattern": "\\S" } } }
+    },
+    "normalizedFindings": { "type": "array", "items": { "$ref": "#/$defs/finding" } }
+  },
+  "$defs": {
+    "anchor": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "\\S" } },
+    "observation": {
+      "type": "object",
+      "required": ["observationId", "runId", "scenarioId", "viewportId", "ruleId", "anchor", "source", "classification", "status"],
+      "properties": {
+        "observationId": { "type": "string", "pattern": "\\S" }, "runId": { "type": "string", "pattern": "\\S" },
+        "scenarioId": { "type": "string", "pattern": "\\S" }, "viewportId": { "type": "string", "pattern": "\\S" },
+        "ruleId": { "type": "string", "pattern": "\\S" }, "anchor": { "$ref": "#/$defs/anchor" },
+        "source": { "enum": ["axe", "playwright"] }, "classification": { "enum": ["rule-violation", "technical-fact"] },
+        "status": { "const": "confirmed" }, "stepId": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+        "evidence": { "type": "object", "required": ["screenshot"], "properties": { "screenshot": { "type": "string", "pattern": "^[a-zA-Z0-9_-]{1,160}\\.png$" } } }
+      },
+      "oneOf": [
+        { "properties": { "source": { "const": "axe" }, "classification": { "const": "rule-violation" }, "ruleId": { "pattern": "^axe:" } } },
+        { "required": ["stepId"], "properties": { "source": { "const": "playwright" }, "classification": { "const": "technical-fact" }, "ruleId": { "pattern": "^playwright:step:" } } }
+      ]
+    },
+    "finding": {
+      "type": "object", "required": ["findingId", "ruleId", "anchor", "observations"],
+      "properties": {
+        "findingId": { "type": "string", "pattern": "^finding-[a-f0-9]{64}$" },
+        "ruleId": { "type": "string", "pattern": "\\S" }, "anchor": { "$ref": "#/$defs/anchor" },
+        "observations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/observation" } }
+      }
+    }
+  }
+}
