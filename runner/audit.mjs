@@ -121,7 +121,7 @@ async function executeAudit(raw) {
           const page = await context.newPage();
           page.setDefaultTimeout(8000);
           page.setDefaultNavigationTimeout(15000);
-          const errors = [];
+          let pageErrorCount = 0;
           let outsideOrigin = false;
           let navigationLoaded = false;
           const assertCurrentOrigin = () => {
@@ -139,7 +139,8 @@ async function executeAudit(raw) {
             }
             throw Error('Переход за пределы адреса проекта');
           };
-          page.on('pageerror', error => errors.push(String(error?.message || error).slice(0, 500)));
+          // Page-controlled exception messages may contain credentials or form values.
+          page.on('pageerror', () => { pageErrorCount = Math.min(pageErrorCount + 1, 1000); });
           await context.route('**/*', async route => {
             try {
               await assertRequestAllowed(route.request().url(), config.baseUrl, basePolicy.baseLoopback, undefined, basePolicy.addresses);
@@ -262,10 +263,10 @@ async function executeAudit(raw) {
             });
           } finally {
             if (navigationLoaded && !outsideOrigin) { try { assertCurrentOrigin(); } catch { /* incident recorded above */ } }
-            for (const message of outsideOrigin ? [] : [...new Set(errors)].slice(0, 6)) {
+            if (!outsideOrigin && pageErrorCount) {
               report.issues.push({
                 id: `JS-${report.issues.length + 1}`, kind: 'javascript', status: 'confirmed', severity: 'high',
-                title: 'JavaScript exception', description: message, scenario: scenario.title, viewport: viewportLabel, screenshot: null
+                title: 'JavaScript exception', description: `На странице возникло исключений: ${pageErrorCount}${pageErrorCount === 1000 ? '+' : ''}. Сообщения исключений не сохраняются.`, scenario: scenario.title, viewport: viewportLabel, screenshot: null
               });
             }
             const filename = `run-${sIdx + 1}-${vIdx + 1}.png`;
