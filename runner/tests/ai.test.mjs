@@ -45,7 +45,7 @@ test('ошибка провайдера не содержит ключ', async (
   const previous = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = 'sk-test-secret-do-not-leak';
   const original = globalThis.fetch;
-  globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => 'unauthorized' });
+  globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => 'sk-test-secret-do-not-leak' });
   const file = await tempPng();
   try {
     await assert.rejects(

@@ -72,7 +72,7 @@ async function executeAudit(raw) {
     version: 1, runId, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai', ...(config.options?.disabledRules ? { disabledRules: config.options.disabledRules } : {}) },
-    summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas и видео; другой видимый текст может содержать личные данные.'],
+    summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas, видео и совпадения значений fill/expectValue в тексте; другие данные и видимый текст могут содержать личную информацию.'],
     normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' },
     scenarioEventsVersion: '0.1', scenarioEvents: []
   };
@@ -96,6 +96,7 @@ async function executeAudit(raw) {
     activeBrowser = browser;
     outer: for (let sIdx = 0; sIdx < config.scenarios.length; sIdx++) {
       const scenario = config.scenarios[sIdx];
+      const maskTextValues = scenario.steps.filter(step => ['fill', 'expectValue'].includes(step.type) && typeof step.value === 'string').map(step => step.value);
       for (let vIdx = 0; vIdx < config.viewports.length; vIdx++) {
         if (Date.now() > deadline) {
           report.status = 'incomplete';
@@ -195,7 +196,7 @@ async function executeAudit(raw) {
                     assertCurrentOrigin();
                     if (step.target) geometryBefore = await collectElementGeometry(page, step.target);
                     assertCurrentOrigin();
-                    await screenshotWithRedaction(page, { path: path.join(screenshots, errorFilename), fullPage: false, timeout: 8000 });
+                    await screenshotWithRedaction(page, { path: path.join(screenshots, errorFilename), fullPage: false, timeout: 8000 }, { maskTextValues });
                     wroteErrorScreenshot = true;
                     assertCurrentOrigin();
                     errorScreenshot = errorFilename;
@@ -296,7 +297,7 @@ async function executeAudit(raw) {
             let wroteFinalScreenshot = false;
             try {
               if (outsideOrigin) throw Error('Скриншот чужого origin не сохраняется');
-              await screenshotWithRedaction(page, { path: path.join(screenshots, filename), fullPage: false, timeout: 8000 });
+              await screenshotWithRedaction(page, { path: path.join(screenshots, filename), fullPage: false, timeout: 8000 }, { maskTextValues });
               wroteFinalScreenshot = true;
               if (navigationLoaded) assertCurrentOrigin();
               result.screenshot = filename;

@@ -40,7 +40,8 @@ export async function reviewScreenshot({ file, scenario, viewport, findings, pro
         body:JSON.stringify({model:process.env.UXPROOF_OLLAMA_MODEL || 'llava',format:'json',stream:false,
           messages:[{role:'system',content:AI_SYSTEM},{role:'user',content:description,images:[base64]}]})
       });
-      if (!response.ok) throw Error(`Ollama HTTP ${response.status}: ${(await response.text()).slice(0,250)}`);
+      // Provider-controlled error bodies can echo keys, prompts or page content.
+      if (!response.ok) throw Error(`Ollama HTTP ${response.status}`);
       const data=await response.json();
       return parseSuggestions(data.message?.content || '');
     }
@@ -62,7 +63,7 @@ export async function reviewScreenshot({ file, scenario, viewport, findings, pro
         ]
       })
     });
-    if (!response.ok) throw Error(`LLM HTTP ${response.status}: ${(await response.text()).slice(0,250)}`);
+    if (!response.ok) throw Error(`LLM HTTP ${response.status}`);
     const data = await response.json();
     const raw = (data.output || []).flatMap(o => (o.content || []).filter(c => c.type === 'output_text').map(c => c.text || '')).join('\n');
     return parseSuggestions(raw);

@@ -32,3 +32,20 @@ test('screenshots hide changed form values and editable text', async () => {
     assert.deepEqual(maskedOne, maskedTwo, 'masked output must not change with field values');
   } finally { await browser.close(); }
 });
+
+test('screenshots also hide visible echoes of scenario values', async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage({ viewport: { width: 600, height: 400 } });
+    await page.setContent('<style>#echo{width:300px;height:30px}#normal{width:200px;height:30px}</style><div id="echo"></div><div id="normal">Public heading</div>');
+    const capture = async value => {
+      await page.locator('#echo').evaluate((element, text) => { element.textContent = `Value: ${text}`; }, value);
+      return { raw: await page.screenshot(), masked: await screenshotWithRedaction(page, {}, { maskTextValues: [value] }) };
+    };
+    const first = await capture('private-alpha');
+    const second = await capture('private-bravo');
+    assert.notDeepEqual(first.raw, second.raw);
+    assert.deepEqual(first.masked, second.masked);
+    assert.throws(() => screenshotWithRedaction(page, {}, { maskTextValues: [null] }), /Invalid screenshot redaction/);
+  } finally { await browser.close(); }
+});
