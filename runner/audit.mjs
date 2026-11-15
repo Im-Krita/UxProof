@@ -7,7 +7,7 @@ import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
 import { assertRequestAllowed, prepareBasePolicy } from './policy.mjs';
 import { axeObservations, failedStepObservation, groupObservations } from './findings.mjs';
-import { comparisonKey } from './comparison.mjs';
+import { comparisonKey, comparisonProfileKey } from './comparison.mjs';
 import { validateNormalizedReport } from './report-contract.mjs';
 import { screenshotWithRedaction } from './screenshot.mjs';
 import { startGuardProxy } from './guard-proxy.mjs';
@@ -67,7 +67,7 @@ async function executeAudit(raw) {
   const start = Date.now();
   const deadline = start + maxDurationMs();
   const report = {
-    version: 1, runId, comparisonKey: comparisonKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
+    version: 1, runId, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai' },
     summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas и видео; другой видимый текст может содержать личные данные.'],

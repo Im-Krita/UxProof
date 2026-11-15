@@ -1,17 +1,55 @@
 // Exact matches are provisional; absence is never interpreted as a confirmed fix.
-export function compareFindings(before, after) {
+export function compareFindings(before, after, options = {}) {
   const valid = report => report && report.status === 'completed' &&
     ['0.1', '0.2'].includes(report.normalizedSchemaVersion) &&
     ['partial', 'complete'].includes(report.normalizedCoverage?.status) && Array.isArray(report.normalizedFindings);
   if (!valid(before) || !valid(after) || before.normalizedSchemaVersion !== after.normalizedSchemaVersion ||
-      typeof before.comparisonKey !== 'string' || !before.comparisonKey || before.comparisonKey !== after.comparisonKey) {
+      typeof before.comparisonKey !== 'string' || !before.comparisonKey || typeof after.comparisonKey !== 'string' || !after.comparisonKey) {
     return { comparable: false, findings: [] };
+  }
+  const exact = before.comparisonKey === after.comparisonKey;
+  let oldScope, newScope;
+  if (!exact) {
+    try {
+      const a = new URL(before.baseUrl), b = new URL(after.baseUrl);
+      if (options.mapPaths !== true || !before.comparisonProfileKey || before.comparisonProfileKey !== after.comparisonProfileKey ||
+          !['http:', 'https:'].includes(a.protocol) || a.origin !== b.origin || a.search !== b.search || a.hash !== b.hash ||
+          a.username || a.password || b.username || b.password || a.pathname === b.pathname) throw Error('incompatible');
+      oldScope = `${a.origin}${a.pathname}`; newScope = `${b.origin}${b.pathname}`;
+    } catch { return { comparable: false, findings: [] }; }
   }
   const ids = report => report.normalizedFindings.map(finding => finding?.findingId);
   const oldIds = ids(before), newIds = ids(after);
   if ([...oldIds, ...newIds].some(id => typeof id !== 'string' || !id) ||
       new Set(oldIds).size !== oldIds.length || new Set(newIds).size !== newIds.length) {
     return { comparable: false, findings: [] };
+  }
+  if (!exact) {
+    const anchorKey = (finding, scope) => {
+      if (typeof finding?.ruleId !== 'string' || !finding.ruleId || !Array.isArray(finding.anchor) ||
+          finding.anchor.length < 2 || finding.anchor[0] !== scope ||
+          finding.anchor.some(part => typeof part !== 'string' || !part)) return null;
+      return JSON.stringify([finding.ruleId, finding.anchor.slice(1)]);
+    };
+    const index = (findings, scope) => {
+      const map = new Map();
+      for (const finding of findings) {
+        const key = anchorKey(finding, scope);
+        if (key) map.set(key, map.has(key) ? null : finding.findingId);
+      }
+      return map;
+    };
+    const oldIndex = index(before.normalizedFindings, oldScope), newIndex = index(after.normalizedFindings, newScope);
+    const matched = new Set();
+    const findings = before.normalizedFindings.map(finding => {
+      const key = anchorKey(finding, oldScope);
+      const afterFindingId = key && oldIndex.get(key) === finding.findingId ? newIndex.get(key) : null;
+      if (!afterFindingId) return { findingId: finding.findingId, status: 'unverified' };
+      matched.add(afterFindingId);
+      return { findingId: finding.findingId, afterFindingId, status: 'still-present' };
+    });
+    findings.push(...newIds.filter(id => !matched.has(id)).map(findingId => ({ findingId, status: 'unverified' })));
+    return { comparable: true, mappedPaths: true, findings };
   }
   const oldSet = new Set(oldIds), newSet = new Set(newIds);
   return { comparable: true, findings: [
@@ -21,8 +59,8 @@ export function compareFindings(before, after) {
 }
 
 // A passed step is evidence about that execution, not proof that a defect is fixed.
-export function recheckedSteps(before, after, finding) {
-  if (!compareFindings(before, after).comparable || before.scenarioEventsVersion !== '0.1' ||
+export function recheckedSteps(before, after, finding, options = {}) {
+  if (!compareFindings(before, after, options).comparable || before.scenarioEventsVersion !== '0.1' ||
       after.scenarioEventsVersion !== '0.1' || !Array.isArray(before.scenarioEvents) ||
       !Array.isArray(after.scenarioEvents) || !Array.isArray(after.results) ||
       !finding || !before.normalizedFindings.includes(finding) ||

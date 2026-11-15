@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compareFindings, comparisonKey } from '../comparison.mjs';
+import { compareFindings, comparisonKey, comparisonProfileKey } from '../comparison.mjs';
 import { presentableFindings, recheckedSteps } from '../matching.mjs';
 
 test('does not claim resolution when coverage is partial', () => {
@@ -17,6 +17,34 @@ test('comparison key captures URL, scenarios, viewport and options, not run meta
   assert.notEqual(comparisonKey(config), comparisonKey({ ...config, baseUrl: 'http://localhost:4180/fixed' }));
   assert.notEqual(comparisonKey(config), comparisonKey({ ...config, viewports: [{ id: 'd', width: 390, height: 844 }] }));
   assert.notEqual(comparisonKey(config), comparisonKey({ ...config, scenarios: [{ id: 's', steps: [{ type: 'click', target: '#b' }] }] }));
+  assert.equal(comparisonProfileKey(config), comparisonProfileKey({ ...config, baseUrl: 'http://localhost:4180/fixed' }));
+  assert.notEqual(comparisonProfileKey(config), comparisonProfileKey({ ...config, baseUrl: 'http://localhost:4181/fixed' }));
+  assert.notEqual(comparisonProfileKey(config), comparisonProfileKey({ ...config, baseUrl: 'http://localhost:4180/fixed?variant=other' }));
+});
+
+test('explicit path mapping pairs only unambiguous exact rule and anchors within each base path', () => {
+  const config = { baseUrl: 'http://localhost:4180/', scenarios: [], viewports: [], options: {} };
+  const afterConfig = { ...config, baseUrl: 'http://localhost:4180/fixed' };
+  const common = { normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' } };
+  const before = { ...common, baseUrl: config.baseUrl, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), normalizedFindings: [
+    { findingId: 'old', ruleId: 'axe:label', anchor: ['http://localhost:4180/', '#same'] },
+    { findingId: 'moved', ruleId: 'axe:color', anchor: ['http://localhost:4180/', '#old'] },
+    { findingId: 'other-page', ruleId: 'axe:label', anchor: ['http://localhost:4180/else', '#same'] }
+  ] };
+  const after = { ...common, baseUrl: afterConfig.baseUrl, comparisonKey: comparisonKey(afterConfig), comparisonProfileKey: comparisonProfileKey(afterConfig), normalizedFindings: [
+    { findingId: 'new', ruleId: 'axe:label', anchor: ['http://localhost:4180/fixed', '#same'] },
+    { findingId: 'moved-new', ruleId: 'axe:color', anchor: ['http://localhost:4180/fixed', '#new'] }
+  ] };
+  assert.equal(compareFindings(before, after).comparable, false);
+  assert.deepEqual(compareFindings(before, after, { mapPaths: true }), { comparable: true, mappedPaths: true, findings: [
+    { findingId: 'old', afterFindingId: 'new', status: 'still-present' },
+    { findingId: 'moved', status: 'unverified' }, { findingId: 'other-page', status: 'unverified' },
+    { findingId: 'moved-new', status: 'unverified' }
+  ] });
+  const duplicate = { ...after, normalizedFindings: [...after.normalizedFindings, { ...after.normalizedFindings[0], findingId: 'duplicate' }] };
+  assert.ok(compareFindings(before, duplicate, { mapPaths: true }).findings.every(item => item.status === 'unverified'));
+  assert.equal(compareFindings(before, { ...after, baseUrl: 'http://other:4180/fixed' }, { mapPaths: true }).comparable, false);
+  assert.equal(compareFindings(before, { ...after, comparisonProfileKey: 'different' }, { mapPaths: true }).comparable, false);
 });
 
 test('rejects incompatible or missing comparison keys', () => {

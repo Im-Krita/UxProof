@@ -5,3 +5,5 @@
 .regression-bar{display:flex;align-items:center;gap:13px;background:#eff7f0;border:1px solid #d9eada;color:#4e8061;border-radius:9px;padding:14px 18px;margin:-4px 0 22px}.regression-bar b,.regression-bar span{display:block}.regression-bar b{font-size:11px;margin-bottom:6px}.regression-bar span{font-size:11px;color:#6d8f78}
 
 .evidence-frame{display:inline-block;position:relative;max-width:100%;line-height:0}.evidence-frame .evidence-image{display:block;width:auto;max-width:100%;max-height:420px;border:0}.evidence-outline{position:absolute;box-sizing:border-box;border:2px solid #ed563f;box-shadow:0 0 0 1px #fff;pointer-events:none}
+
+.comparison-controls{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:20px;font-size:12px;color:#455b4d}.comparison-controls select{max-width:100%;padding:8px;border:1px solid #dce5e1;border-radius:7px;background:#fff;color:#455b4d}.comparison-controls label{display:flex;align-items:center;gap:6px}

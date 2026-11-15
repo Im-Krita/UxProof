@@ -11,4 +11,12 @@ export function comparisonKey(config) {
   return `comparison-v1-${createHash('sha256').update(JSON.stringify(canonical(input))).digest('hex')}`;
 }
 
+// Retains origin, query, fragment and all test settings; only the pathname may be explicitly mapped.
+export function comparisonProfileKey(config) {
+  const url = new URL(config.baseUrl);
+  const input = { version: 1, origin: url.origin, search: url.search, hash: url.hash,
+    scenarios: config.scenarios, viewports: config.viewports, options: config.options || {} };
+  return `comparison-profile-v1-${createHash('sha256').update(JSON.stringify(canonical(input))).digest('hex')}`;
+}
+
 export { compareFindings } from './matching.mjs';
