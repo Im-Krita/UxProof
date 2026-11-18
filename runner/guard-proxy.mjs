@@ -17,8 +17,9 @@ function pinnedLookup(addresses) {
 
 // Chromium is configured to route even loopback destinations here. Each connection
 // uses the exact IP returned by the policy check, rather than resolving a second time.
-export async function startGuardProxy({ baseUrl, basePolicy, onBlocked = () => {}, lookup, maxRequests = 10000 }) {
+export async function startGuardProxy({ baseUrl, basePolicy, onBlocked = () => {}, lookup, maxRequests = 10000, maxTunnelBytes = 32 * 1024 * 1024, maxTotalTunnelBytes = 128 * 1024 * 1024 }) {
   if (!Number.isInteger(maxRequests) || maxRequests < 1) throw Error('Недопустимый лимит сетевых запросов');
+  if (!Number.isInteger(maxTunnelBytes) || maxTunnelBytes < 1 || !Number.isInteger(maxTotalTunnelBytes) || maxTotalTunnelBytes < 1) throw Error('Недопустимый лимит размера туннеля');
   const username = randomBytes(16).toString('hex');
   const password = randomBytes(24).toString('hex');
   const expected = Buffer.from(`Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`);
@@ -27,6 +28,32 @@ export async function startGuardProxy({ baseUrl, basePolicy, onBlocked = () => {
   const sockets = new Set();
   let closed = false;
   let requestCount = 0;
+  const tunnelTotals = { bytes: 0 };
+  const relayTunnel = (client, upstream, head) => {
+    const state = { bytes: head.length, tripped: false };
+    tunnelTotals.bytes += head.length;
+    const stop = () => {
+      if (state.tripped) return;
+      state.tripped = true;
+      blocked('Превышен лимит размера туннеля');
+      client.destroy();
+      upstream.destroy();
+    };
+    if (state.bytes > maxTunnelBytes || tunnelTotals.bytes > maxTotalTunnelBytes) { stop(); return; }
+    const forward = (from, to) => {
+      from.on('data', chunk => {
+        state.bytes += chunk.length;
+        tunnelTotals.bytes += chunk.length;
+        if (state.bytes > maxTunnelBytes || tunnelTotals.bytes > maxTotalTunnelBytes) { stop(); return; }
+        if (!to.write(chunk)) from.pause();
+      });
+    };
+    forward(client, upstream);
+    forward(upstream, client);
+    client.on('drain', () => upstream.resume());
+    upstream.on('drain', () => client.resume());
+    if (head.length && !upstream.write(head)) client.pause();
+  };
   const remember = socket => {
     sockets.add(socket);
     socket.on('error', () => {});
@@ -121,8 +148,7 @@ export async function startGuardProxy({ baseUrl, basePolicy, onBlocked = () => {
       connected = true;
       upstream.setTimeout(0);
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-      if (head.length) upstream.write(head);
-      socket.pipe(upstream); upstream.pipe(socket);
+      relayTunnel(socket, upstream, head);
     });
     upstream.on('error', () => {
       if (!connected && !socket.destroyed) socket.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
@@ -156,8 +182,7 @@ export async function startGuardProxy({ baseUrl, basePolicy, onBlocked = () => {
         if (!['proxy-authorization', 'proxy-connection'].includes(name.toLowerCase())) header += `${name}: ${request.rawHeaders[index + 1]}\r\n`;
       }
       upstream.write(`${header}\r\n`);
-      if (head.length) upstream.write(head);
-      socket.pipe(upstream); upstream.pipe(socket);
+      relayTunnel(socket, upstream, head);
     });
     upstream.on('error', () => socket.destroy());
     socket.on('error', () => upstream.destroy());

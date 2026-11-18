@@ -1,0 +1,18 @@
+{
+  "minScenarios": 1,
+  "maxScenarios": 10,
+  "minSteps": 1,
+  "maxSteps": 30,
+  "minViewports": 1,
+  "maxViewports": 4,
+  "minWidth": 320,
+  "maxWidth": 3840,
+  "minHeight": 400,
+  "maxHeight": 2160,
+  "maxProjectLen": 200,
+  "maxScenarioTitle": 200,
+  "maxStepName": 200,
+  "maxTarget": 500,
+  "maxValue": 2000,
+  "stepTypes": ["click", "fill", "select", "check", "navigate", "expectVisible", "expectHidden", "expectText", "expectValue", "wait"]
+}

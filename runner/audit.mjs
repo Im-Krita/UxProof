@@ -2,11 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
-import { executeStep, validateConfig, evidenceType } from './validators.mjs';
+import { executeStep, humanStepError, validateConfig, evidenceType } from './validators.mjs';
 import { reviewScreenshot } from './ai.mjs';
 import { renderHtml } from './html.mjs';
 import { assertRequestAllowed, prepareBasePolicy } from './policy.mjs';
-import { axeObservations, failedStepObservation, groupObservations, scopeIdentifier } from './findings.mjs';
+import { axeObservations, countedObservation, failedStepObservation, groupObservations, scopeIdentifier } from './findings.mjs';
 import { comparisonKey, comparisonProfileKey } from './comparison.mjs';
 import { validateNormalizedReport } from './report-contract.mjs';
 import { screenshotWithRedaction } from './screenshot.mjs';
@@ -21,12 +21,34 @@ import { collectDuplicateHeadings } from './copy-headings.mjs';
 let runActive = false;
 let activeBrowser = null;
 let shutdownBound = false;
+let cancelRequested = false;
 
 export class ConflictError extends Error {
   constructor() {
     super('Уже выполняется другая проверка. Дождитесь её завершения.');
     this.name = 'ConflictError';
   }
+}
+
+export class IdleError extends Error {
+  constructor() {
+    super('Нет выполняющейся проверки');
+    this.name = 'IdleError';
+  }
+}
+
+export class CancelledError extends Error {
+  constructor() {
+    super('Проверка остановлена');
+    this.name = 'CancelledError';
+  }
+}
+
+export function cancelRunningAudit() {
+  if (!runActive) throw new IdleError();
+  cancelRequested = true;
+  const browser = activeBrowser;
+  if (browser) browser.close().catch(() => {});
 }
 
 export function acquireAuditLock() {
@@ -72,8 +94,11 @@ async function executeAudit(raw) {
     version: 1, runId, comparisonKey: comparisonKey(config), comparisonProfileKey: comparisonProfileKey(config), baseScopeId: scopeIdentifier(config.baseUrl), project: String(config.project || 'Новый проект').slice(0, 200), baseUrl: config.baseUrl,
     startedAt: new Date().toISOString(), durationMs: 0, status: 'completed',
     options: { enableAI: Boolean(config.options?.enableAI), aiProvider: config.options?.aiProvider || 'openai', ...(config.options?.disabledRules ? { disabledRules: config.options.disabledRules } : {}), ...(config.options?.trace === 'on-failure' ? { trace: 'on-failure' } : {}) },
-    summary: {}, results: [], issues: [], warnings: ['На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas, видео и совпадения значений fill/expectValue в тексте; другие данные и видимый текст могут содержать личную информацию.'],
-    normalizedSchemaVersion: '0.2', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright'], note: 'Only axe nodes with explicit selectors and failed scenario steps are included.' },
+    summary: {}, results: [], issues: [], warnings: [
+      'На скриншотах скрыты поля ввода, редактируемые области, iframe, canvas, видео и совпадения значений fill/expectValue в тексте. Видимый текст страницы может остаться на PNG.',
+      'Лимит 10 000 относится к рукопожатиям прокси (HTTP-запросы и CONNECT), а не к запросам внутри HTTPS.'
+    ],
+    normalizedSchemaVersion: '0.3', normalizedFindings: [], normalizedCoverage: { status: 'partial', sources: ['axe', 'playwright', 'runtime', 'layout', 'copy', 'ai'], note: 'Axe nodes, failed steps, JS exceptions, overflow, duplicate headings and AI suggestions are included; coverage stays partial.' },
     scenarioEventsVersion: '0.1', scenarioEvents: []
   };
   const observations = [];
@@ -100,6 +125,7 @@ async function executeAudit(raw) {
       const scenario = config.scenarios[sIdx];
       const maskTextValues = scenario.steps.filter(step => ['fill', 'expectValue'].includes(step.type) && typeof step.value === 'string').map(step => step.value);
       for (let vIdx = 0; vIdx < config.viewports.length; vIdx++) {
+        if (cancelRequested) break outer;
         if (Date.now() > deadline) {
           report.status = 'incomplete';
           report.warnings.push('Проверка остановлена: превышено максимальное время');
@@ -107,6 +133,7 @@ async function executeAudit(raw) {
         }
         const vp = config.viewports[vIdx];
         const viewportLabel = vp.label || `${vp.width}×${vp.height}`;
+        const scopeIds = { scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`) };
         const result = {
           id: `${sIdx}-${vIdx}`, scenario: scenario.title, viewport: viewportLabel,
           width: vp.width, height: vp.height, status: 'passed', passedSteps: 0,
@@ -128,10 +155,20 @@ async function executeAudit(raw) {
             try { await context.tracing.start({ screenshots: true, snapshots: true, sources: false }); tracingStarted = true; }
             catch { report.warnings.push(`Не удалось начать trace: ${scenario.title}/${viewportLabel}`); }
           }
+          const projectOrigin = new URL(config.baseUrl).origin;
+          let pageErrorCount = 0;
+          let mainPage;
+          context.on('page', nextPage => {
+            nextPage.on('pageerror', () => { pageErrorCount = Math.min(pageErrorCount + 1, 1000); });
+            if (mainPage && nextPage !== mainPage) {
+              nextPage.route('**/*', route => route.abort('blockedbyclient')).catch(() => {});
+              nextPage.close().catch(() => {});
+            }
+          });
           const page = await context.newPage();
+          mainPage = page;
           page.setDefaultTimeout(8000);
           page.setDefaultNavigationTimeout(15000);
-          let pageErrorCount = 0;
           let navigationLoaded = false;
           const recordOutsideOrigin = message => {
             if (outsideOrigin) return;
@@ -141,26 +178,52 @@ async function executeAudit(raw) {
             report.warnings.push(message);
             report.issues.push({ id: `NAV-${report.issues.length + 1}`, kind: 'functional', status: 'confirmed', severity: 'high',
               title: 'Переход за пределы проекта', description: 'Обнаружен переход на другой origin; шаги и сбор доказательств остановлены.',
-              scenario: scenario.title, viewport: viewportLabel, screenshot: null });
+              scenario: scenario.title, viewport: viewportLabel, screenshot: null, ruleId: 'navigate:outside', ...scopeIds });
           };
           const assertCurrentOrigin = () => {
             if (outsideOrigin) throw Error('Переход за пределы адреса проекта');
-            let currentOrigin = '';
-            try { currentOrigin = new URL(page.url()).origin; } catch { /* treated as outside the project */ }
-            if (currentOrigin === new URL(config.baseUrl).origin) return;
-            recordOutsideOrigin('Переход за пределы адреса проекта обнаружен после загрузки; дальнейшие шаги остановлены.');
-            throw Error('Переход за пределы адреса проекта');
+            for (const current of context.pages()) {
+              const currentUrl = current.url();
+              if (!currentUrl || currentUrl === 'about:blank') continue;
+              let currentOrigin = '';
+              try { currentOrigin = new URL(currentUrl).origin; } catch { /* treated as outside the project */ }
+              if (currentOrigin === projectOrigin) continue;
+              recordOutsideOrigin('Переход за пределы адреса проекта обнаружен после загрузки; дальнейшие шаги остановлены.');
+              throw Error('Переход за пределы адреса проекта');
+            }
           };
-          // Page-controlled exception messages may contain credentials or form values.
-          page.on('pageerror', () => { pageErrorCount = Math.min(pageErrorCount + 1, 1000); });
+          const stopForeignNavigation = async route => {
+            recordOutsideOrigin('Переход за пределы адреса проекта заблокирован до загрузки; дальнейшие шаги остановлены.');
+            await route.abort('blockedbyclient').catch(() => {});
+          };
           await context.route('**/*', async route => {
             try {
               const request = route.request();
-              if (request.isNavigationRequest() && request.frame() === page.mainFrame() &&
-                  new URL(request.url()).origin !== new URL(config.baseUrl).origin) {
-                recordOutsideOrigin('Переход за пределы адреса проекта заблокирован до загрузки; дальнейшие шаги остановлены.');
-                await route.abort('blockedbyclient').catch(() => {});
-                return;
+              if (request.isNavigationRequest()) {
+                let requestUrl;
+                try { requestUrl = new URL(request.url()); }
+                catch { await stopForeignNavigation(route); return; }
+                if (requestUrl.protocol !== 'about:' && requestUrl.origin !== projectOrigin) {
+                  await stopForeignNavigation(route);
+                  return;
+                }
+                if (requestUrl.protocol !== 'about:') {
+                  const response = await route.fetch({ maxRedirects: 0 });
+                  const status = response.status();
+                  if (status >= 300 && status < 400) {
+                    const location = response.headers()['location'];
+                    if (location) {
+                      let next;
+                      try { next = new URL(location, request.url()); } catch { next = null; }
+                      if (!next || next.origin !== projectOrigin) {
+                        await stopForeignNavigation(route);
+                        return;
+                      }
+                    }
+                  }
+                  await route.fulfill({ response });
+                  return;
+                }
               }
               await assertRequestAllowed(route.request().url(), config.baseUrl, basePolicy.baseLoopback, undefined, basePolicy.addresses);
               await route.continue();
@@ -249,9 +312,9 @@ async function executeAudit(raw) {
                 result.status = 'failed';
                 if (!outsideOrigin) report.issues.push({
                   id: `FUNC-${report.issues.length + 1}`, kind: 'functional', status: evidenceType('functional'), severity: 'high',
-                  title: `Шаг ${i + 1}: ${name}`, description: message, scenario: scenario.title, viewport: viewportLabel,
+                  title: `Шаг ${i + 1}: ${name}`, description: humanStepError(step, message), scenario: scenario.title, viewport: viewportLabel,
                   reproduction: `Открыть ${config.baseUrl} → ${scenario.steps.slice(0, i + 1).map(item => item.name || item.type).join(' → ')}`,
-                  step: i + 1, screenshot: errorScreenshot
+                  step: i + 1, screenshot: errorScreenshot, ...scopeIds
                 });
                 break;
               }
@@ -268,7 +331,7 @@ async function executeAudit(raw) {
                   severity: violation.impact === 'critical' || violation.impact === 'serious' ? 'high' : 'medium',
                   title: violation.help, description: `${violation.description} · Элементы: ${violation.nodes.slice(0, 3).map(node => node.target.join(' ')).join(', ')}`,
                   scenario: scenario.title, viewport: viewportLabel, step: null, screenshot: null,
-                  ruleId: violation.id, helpUrl: violation.helpUrl, affectedNodes: violation.nodes.length
+                  ruleId: violation.id, helpUrl: violation.helpUrl, affectedNodes: violation.nodes.length, ...scopeIds
                 });
               }
             } catch (error) {
@@ -277,10 +340,15 @@ async function executeAudit(raw) {
             try {
               const overflow = viewportOverflow(await page.evaluate(() => ({ actual: document.documentElement.scrollWidth, expected: window.innerWidth })), config.options?.disabledRules);
               if (overflow) {
+                const observation = countedObservation({
+                  pageUrl: page.url(), runId, scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`),
+                  ruleId: overflow.ruleId, source: 'layout', classification: 'rule-violation', status: 'confirmed', token: `overflow:${overflow.actual}x${overflow.expected}`
+                });
+                if (observation) observations.push(observation);
                 report.issues.push({
                   id: `LAYOUT-${report.issues.length + 1}`, kind: 'overflow', status: 'confirmed', severity: 'medium',
                   ruleId: overflow.ruleId, title: overflow.title, description: overflow.description,
-                  scenario: scenario.title, viewport: viewportLabel, screenshot: null
+                  scenario: scenario.title, viewport: viewportLabel, screenshot: null, ...scopeIds
                 });
               }
             } catch { /* страница уже закрыта */ }
@@ -290,14 +358,21 @@ async function executeAudit(raw) {
             result.status = 'failed';
             if (!outsideOrigin) report.issues.push({
               id: `NAV-${report.issues.length + 1}`, kind: 'functional', status: 'confirmed', severity: 'high',
-              title: 'Не удалось открыть страницу', description: message, scenario: scenario.title, viewport: viewportLabel, screenshot: null
+              title: 'Не удалось открыть страницу', description: message, scenario: scenario.title, viewport: viewportLabel, screenshot: null,
+              ruleId: 'navigate:open-failed', ...scopeIds
             });
           } finally {
             if (navigationLoaded && !outsideOrigin) { try { assertCurrentOrigin(); } catch { /* incident recorded above */ } }
             if (!outsideOrigin && pageErrorCount) {
+              const observation = countedObservation({
+                pageUrl: page.url(), runId, scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`),
+                ruleId: 'javascript:pageerror', source: 'runtime', classification: 'technical-fact', status: 'confirmed', token: `count:${pageErrorCount}`
+              });
+              if (observation) observations.push(observation);
               report.issues.push({
                 id: `JS-${report.issues.length + 1}`, kind: 'javascript', status: 'confirmed', severity: 'high',
-                title: 'JavaScript exception', description: `На странице возникло исключений: ${pageErrorCount}${pageErrorCount === 1000 ? '+' : ''}. Сообщения исключений не сохраняются.`, scenario: scenario.title, viewport: viewportLabel, screenshot: null
+                title: 'JavaScript exception', description: `На странице возникло исключений: ${pageErrorCount}${pageErrorCount === 1000 ? '+' : ''}. Сообщения исключений не сохраняются.`, scenario: scenario.title, viewport: viewportLabel, screenshot: null,
+                ruleId: 'javascript:pageerror', ...scopeIds
               });
             }
             const filename = `run-${sIdx + 1}-${vIdx + 1}.png`;
@@ -319,12 +394,22 @@ async function executeAudit(raw) {
                   const copy = await collectDuplicateHeadings(page);
                   assertCurrentOrigin();
                   if (copy.truncated) report.warnings.push(`Проверка повторов ограничена 5000 элементами: ${scenario.title}/${viewportLabel}`);
-                  if (copy.duplicateGroups) report.issues.push({
+                  if (copy.duplicateGroups) {
+                    const observation = countedObservation({
+                      pageUrl: page.url(), runId, scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`),
+                      ruleId: 'copy:duplicate-heading', source: 'copy', classification: 'hypothesis', status: 'recommendation', token: `groups:${copy.duplicateGroups}`
+                    });
+                    if (observation) {
+                      observation.evidence = { screenshot: filename };
+                      observations.push(observation);
+                    }
+                    report.issues.push({
                     id: `COPY-${report.issues.length + 1}`, kind: 'copy', status: 'recommendation', severity: 'low',
                     ruleId: 'copy:duplicate-heading', title: 'Возможно, повторяются заголовки',
                     description: `В видимой области найдено повторяющихся групп: ${copy.duplicateGroups} (заголовков: ${copy.duplicateHeadings}). Проверьте контекст: повторение может быть необходимым.`,
-                    scenario: scenario.title, viewport: viewportLabel, screenshot: filename
+                    scenario: scenario.title, viewport: viewportLabel, screenshot: filename, ...scopeIds
                   });
+                  }
                 } catch {
                   if (outsideOrigin) throw Error('Переход за пределы адреса проекта');
                   report.warnings.push(`Не удалось проверить повторение заголовков: ${scenario.title}/${viewportLabel}`);
@@ -349,14 +434,23 @@ async function executeAudit(raw) {
                   provider: config.options?.aiProvider || 'openai',
                   findings: report.issues.filter(issue => issue.scenario === scenario.title && issue.viewport === viewportLabel).map(issue => issue.title)
                 });
-                for (const suggestion of suggestions) {
+                suggestions.forEach((suggestion, index) => {
+                  const observation = countedObservation({
+                    pageUrl: config.baseUrl, runId, scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`),
+                    ruleId: `ai-ux:slot-${index + 1}`, source: 'ai', classification: 'hypothesis', status: 'recommendation', token: `slot:${index + 1}`
+                  });
+                  if (observation) {
+                    observation.evidence = { screenshot: filename };
+                    observations.push(observation);
+                  }
                   report.issues.push({
                     id: `AI-${report.issues.length + 1}`, kind: 'ai-ux', status: 'recommendation',
                     severity: ['low', 'medium', 'high'].includes(suggestion.severity) ? suggestion.severity : 'low',
                     title: String(suggestion.title).slice(0, 140), description: String(suggestion.description).slice(0, 700),
-                    scenario: scenario.title, viewport: viewportLabel, screenshot: filename
+                    scenario: scenario.title, viewport: viewportLabel, screenshot: filename,
+                    ruleId: `ai-ux:slot-${index + 1}`, ...scopeIds
                   });
-                }
+                });
               } catch (error) {
                 report.warnings.push(`ИИ ${scenario.title}: ${String(error.message || error).slice(0, 260)}`);
               }
@@ -398,6 +492,7 @@ async function executeAudit(raw) {
     if (browser) await browser.close().catch(() => {});
     if (proxy) await proxy.close().catch(() => {});
   }
+  if (cancelRequested) throw new CancelledError();
   report.durationMs = Date.now() - start;
   report.normalizedFindings = groupObservations(observations);
   validateNormalizedReport(report);
@@ -434,9 +529,11 @@ async function executeAudit(raw) {
 
 export async function runAudit(raw) {
   const release = acquireAuditLock();
+  cancelRequested = false;
   try {
     return await executeAudit(raw);
   } finally {
+    cancelRequested = false;
     release();
   }
 }

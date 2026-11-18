@@ -8,7 +8,7 @@ export function pageScope(value) {
 // Exact matches are provisional; absence alone is never interpreted as a confirmed fix.
 export function compareFindings(before, after, options = {}) {
   const valid = report => report && report.status === 'completed' &&
-    ['0.1', '0.2'].includes(report.normalizedSchemaVersion) &&
+    ['0.1', '0.2', '0.3'].includes(report.normalizedSchemaVersion) &&
     ['partial', 'complete'].includes(report.normalizedCoverage?.status) && Array.isArray(report.normalizedFindings);
   if (!valid(before) || !valid(after) || before.normalizedSchemaVersion !== after.normalizedSchemaVersion ||
       typeof before.comparisonKey !== 'string' || !before.comparisonKey || typeof after.comparisonKey !== 'string' || !after.comparisonKey) {
@@ -55,13 +55,13 @@ export function compareFindings(before, after, options = {}) {
       matched.add(afterFindingId);
       return { findingId: finding.findingId, afterFindingId, status: 'still-present' };
     });
-    findings.push(...newIds.filter(id => !matched.has(id)).map(findingId => ({ findingId, status: 'unverified' })));
+    findings.push(...newIds.filter(id => !matched.has(id)).map(findingId => ({ findingId, status: 'new' })));
     return markRecheckedSteps(before, after, { comparable: true, mappedPaths: true, findings });
   }
   const oldSet = new Set(oldIds), newSet = new Set(newIds);
   return markRecheckedSteps(before, after, { comparable: true, findings: [
     ...oldIds.map(findingId => ({ findingId, status: newSet.has(findingId) ? 'still-present' : 'unverified' })),
-    ...newIds.filter(id => !oldSet.has(id)).map(findingId => ({ findingId, status: 'unverified' }))
+    ...newIds.filter(id => !oldSet.has(id)).map(findingId => ({ findingId, status: 'new' }))
   ] });
 }
 
@@ -149,7 +149,7 @@ export function recheckedSteps(before, after, finding, options = {}) {
 // Validate only the fields needed to render the extension; unknown rule IDs remain visible.
 export function presentableFindings(report) {
   if (!report || typeof report.runId !== 'string' || !report.runId ||
-      !['0.1', '0.2'].includes(report.normalizedSchemaVersion) || !Array.isArray(report.normalizedFindings)) return null;
+      !['0.1', '0.2', '0.3'].includes(report.normalizedSchemaVersion) || !Array.isArray(report.normalizedFindings)) return null;
   const findingIds = new Set(), observationIds = new Set();
   for (const finding of report.normalizedFindings) {
     if (!finding || typeof finding.findingId !== 'string' || !finding.findingId || findingIds.has(finding.findingId) ||
@@ -165,4 +165,94 @@ export function presentableFindings(report) {
     }
   }
   return report.normalizedFindings;
+}
+
+const SOURCE_KIND = {
+  axe: 'accessibility',
+  playwright: 'functional',
+  runtime: 'javascript',
+  layout: 'overflow',
+  copy: 'copy',
+  ai: 'ai-ux'
+};
+
+const VIEWPORT_DISPLAY = { mobile: 'Телефон', tablet: 'Планшет', desktop: 'Компьютер' };
+const VIEWPORT_ALIASES = {
+  mobile: ['mobile', 'телефон'],
+  tablet: ['tablet', 'планшет'],
+  desktop: ['desktop', 'компьютер']
+};
+
+export function displayViewportLabel(viewportId, stored) {
+  if (viewportId && VIEWPORT_DISPLAY[viewportId]) return VIEWPORT_DISPLAY[viewportId];
+  const lower = String(stored || '').toLowerCase();
+  for (const [id, aliases] of Object.entries(VIEWPORT_ALIASES)) {
+    if (aliases.includes(lower)) return VIEWPORT_DISPLAY[id];
+  }
+  return (typeof stored === 'string' && stored.trim() ? stored : viewportId) || '';
+}
+
+function combinationResult(report, observation) {
+  if (!report || !Array.isArray(report.results) || !observation) return undefined;
+  const shot = observation.evidence?.screenshot;
+  const named = typeof shot === 'string' && shot.match(/^run-(\d+)-(\d+)\.png$/);
+  if (named) {
+    const hit = report.results.find(item => item.id === `${Number(named[1]) - 1}-${Number(named[2]) - 1}`);
+    if (hit) return hit;
+  }
+  const s = typeof observation.scenarioId === 'string' && observation.scenarioId.startsWith('index:')
+    ? Number(observation.scenarioId.slice(6)) : NaN;
+  const v = typeof observation.viewportId === 'string' && observation.viewportId.startsWith('index:')
+    ? Number(observation.viewportId.slice(6)) : NaN;
+  if (Number.isInteger(s) && Number.isInteger(v)) {
+    return report.results.find(item => item.id === `${s}-${v}`);
+  }
+  return undefined;
+}
+
+function sameViewport(issue, observation) {
+  if (issue.viewportId && observation.viewportId) return issue.viewportId === observation.viewportId;
+  const aliases = VIEWPORT_ALIASES[observation.viewportId] || [];
+  const lower = String(issue.viewport || '').toLowerCase();
+  if (aliases.includes(lower) || lower === String(observation.viewportId || '').toLowerCase()) return true;
+  return displayViewportLabel(observation.viewportId, issue.viewport) === issue.viewport;
+}
+
+function issueMatchesObservation(report, issue, finding, observation) {
+  if (!issue || !finding || !observation) return false;
+  const kind = SOURCE_KIND[observation.source];
+  if (!kind || issue.kind !== kind) return false;
+  if (observation.source === 'axe') {
+    if (`axe:${issue.ruleId}` !== finding.ruleId && issue.ruleId !== finding.ruleId) return false;
+  } else if (observation.source === 'playwright') {
+    if (String(issue.step) !== String(observation.stepId)) return false;
+  } else if (finding.ruleId && issue.ruleId && issue.ruleId !== finding.ruleId) {
+    return false;
+  }
+  const shot = observation.evidence?.screenshot;
+  if (shot && issue.screenshot && issue.screenshot !== shot) return false;
+  if (issue.scenarioId && observation.scenarioId && issue.scenarioId !== observation.scenarioId) return false;
+  if (issue.viewportId && observation.viewportId && issue.viewportId !== observation.viewportId) return false;
+  if (!issue.scenarioId || !issue.viewportId) {
+    const result = combinationResult(report, observation);
+    if (result) {
+      if (issue.scenario !== result.scenario) return false;
+      if (issue.viewport !== result.viewport && !sameViewport(issue, observation)) return false;
+    } else if (observation.viewportId && !sameViewport(issue, observation)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function findingIssue(report, finding, observationId) {
+  if (!report || !finding || !Array.isArray(report.issues) || !Array.isArray(finding.observations)) return undefined;
+  const observations = observationId
+    ? finding.observations.filter(item => item.observationId === observationId)
+    : finding.observations;
+  for (const observation of observations) {
+    const issue = report.issues.find(item => issueMatchesObservation(report, item, finding, observation));
+    if (issue) return issue;
+  }
+  return undefined;
 }

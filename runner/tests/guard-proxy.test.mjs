@@ -140,6 +140,32 @@ test('CONNECT tunnels approved addresses and blocks metadata before connecting',
   }
 });
 
+test('CONNECT tunnel closes once the byte ceiling is crossed', async () => {
+  const target = net.createServer(socket => { socket.on('data', () => socket.write(Buffer.alloc(80, 7))); });
+  target.listen(0, '127.0.0.1'); await once(target, 'listening');
+  const base = `http://127.0.0.1:${target.address().port}/`;
+  const blocks = [];
+  const proxy = await startGuardProxy({ baseUrl: base, basePolicy: await prepareBasePolicy(base), maxTunnelBytes: 50, maxTotalTunnelBytes: 50, onBlocked: note => blocks.push(note) });
+  const address = new URL(proxy.server);
+  try {
+    const socket = await new Promise((resolve, reject) => {
+      const req = http.request({ host: address.hostname, port: address.port, method: 'CONNECT', path: `127.0.0.1:${target.address().port}`, headers: { 'Proxy-Authorization': auth(proxy) } });
+      req.on('connect', (_res, connected) => resolve(connected));
+      req.on('error', reject); req.end();
+    });
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('tunnel stayed open past the byte ceiling')), 3000);
+      socket.on('close', () => { clearTimeout(timer); resolve(); });
+      socket.on('error', () => {});
+      socket.write('ping');
+    });
+    assert.ok(blocks.some(note => /лимит размера туннеля/.test(note)));
+  } finally {
+    await proxy.close();
+    await new Promise(resolve => target.close(resolve));
+  }
+});
+
 test('Chromium cannot bypass an unavailable proxy for loopback addresses', async () => {
   let hits = 0;
   const target = http.createServer((_req, res) => { hits++; res.end('unsafe bypass'); });
@@ -156,6 +182,33 @@ test('Chromium cannot bypass an unavailable proxy for loopback addresses', async
     await context.close();
   } finally {
     await browser.close();
+    await new Promise(resolve => target.close(resolve));
+  }
+});
+
+test('WebSocket upgrade closes once the byte ceiling is crossed', async () => {
+  const target = net.createServer(socket => { socket.on('data', () => socket.write(Buffer.alloc(80, 7))); });
+  target.listen(0, '127.0.0.1'); await once(target, 'listening');
+  const base = `http://127.0.0.1:${target.address().port}/`;
+  const blocks = [];
+  const proxy = await startGuardProxy({ baseUrl: base, basePolicy: await prepareBasePolicy(base), maxTunnelBytes: 50, maxTotalTunnelBytes: 50, onBlocked: note => blocks.push(note) });
+  const address = new URL(proxy.server);
+  try {
+    const socket = net.connect({ host: address.hostname, port: Number(address.port) });
+    await once(socket, 'connect');
+    socket.write(
+      `GET ${base} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+      `Proxy-Authorization: ${auth(proxy)}\r\n\r\n`
+    );
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('websocket stayed open past the byte ceiling')), 3000);
+      socket.on('close', () => { clearTimeout(timer); resolve(); });
+      socket.on('error', () => {});
+      socket.write('ping');
+    });
+    assert.ok(blocks.some(note => /лимит размера туннеля/.test(note)));
+  } finally {
+    await proxy.close();
     await new Promise(resolve => target.close(resolve));
   }
 });

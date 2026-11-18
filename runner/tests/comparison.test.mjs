@@ -7,7 +7,7 @@ test('does not claim resolution when coverage is partial', () => {
   const before = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' }, normalizedFindings: [{ findingId: 'a' }, { findingId: 'b' }] };
   const after = { ...before, normalizedFindings: [{ findingId: 'a' }, { findingId: 'c' }] };
   assert.deepEqual(compareFindings(before, after), { comparable: true, findings: [
-    { findingId: 'a', status: 'still-present' }, { findingId: 'b', status: 'unverified' }, { findingId: 'c', status: 'unverified' }
+    { findingId: 'a', status: 'still-present' }, { findingId: 'b', status: 'unverified' }, { findingId: 'c', status: 'new' }
   ] });
 });
 
@@ -39,10 +39,10 @@ test('explicit path mapping pairs only unambiguous exact rule and anchors within
   assert.deepEqual(compareFindings(before, after, { mapPaths: true }), { comparable: true, mappedPaths: true, findings: [
     { findingId: 'old', afterFindingId: 'new', status: 'still-present' },
     { findingId: 'moved', status: 'unverified' }, { findingId: 'other-page', status: 'unverified' },
-    { findingId: 'moved-new', status: 'unverified' }
+    { findingId: 'moved-new', status: 'new' }
   ] });
   const duplicate = { ...after, normalizedFindings: [...after.normalizedFindings, { ...after.normalizedFindings[0], findingId: 'duplicate' }] };
-  assert.ok(compareFindings(before, duplicate, { mapPaths: true }).findings.every(item => item.status === 'unverified'));
+  assert.ok(compareFindings(before, duplicate, { mapPaths: true }).findings.every(item => item.status === 'unverified' || item.status === 'new'));
   assert.equal(compareFindings(before, { ...after, baseUrl: 'http://other:4180/fixed' }, { mapPaths: true }).comparable, false);
   assert.equal(compareFindings(before, { ...after, comparisonProfileKey: 'different' }, { mapPaths: true }).comparable, false);
 });
@@ -56,7 +56,7 @@ test('even complete coverage does not resolve a potentially moved element', () =
   const before = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'complete' }, normalizedFindings: [{ findingId: 'a' }] };
   const after = { ...before, normalizedFindings: [{ findingId: 'b' }] };
   assert.deepEqual(compareFindings(before, after).findings, [
-    { findingId: 'a', status: 'unverified' }, { findingId: 'b', status: 'unverified' }
+    { findingId: 'a', status: 'unverified' }, { findingId: 'b', status: 'new' }
   ]);
   assert.equal(compareFindings(before, { ...after, normalizedFindings: [{ findingId: 'b' }, { findingId: 'b' }] }).comparable, false);
 });

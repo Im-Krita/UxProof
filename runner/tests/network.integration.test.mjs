@@ -19,7 +19,7 @@ test('browser aborts redirects to cloud metadata addresses', async () => {
       scenarios: [{ id: 's', title: 'redirect', steps: [{ type: 'wait', name: 'wait', value: '1' }] }],
       viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } });
     assert.equal(report.results[0].status, 'failed');
-    assert.ok(report.warnings.some(warning => warning.includes('Заблокирован запрос')));
+    assert.ok(report.warnings.some(warning => /заблокирован до загрузки/.test(warning)));
     assert.ok(initialRequests > 0, 'the initial permitted request must reach the fixture');
   } finally {
     await new Promise(resolve => server.close(resolve));
@@ -92,13 +92,40 @@ test('a cross-origin redirect stops subsequent scripted actions', async () => {
     const report = await runAudit({ runId: 'cross-origin-test', outputDir: dir, project: 'test', baseUrl: `http://127.0.0.1:${origin.address().port}/`,
       scenarios: [{ id: 's', title: 'redirect', steps: [{ type: 'click', name: 'action', target: 'css:#action' }] }],
       viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false, trace: 'on-failure' } });
-    assert.ok(targetHits > 0, 'fixture proves the redirect reached the other origin before detection');
+    assert.equal(targetHits, 0, 'the redirect target must not be requested');
     assert.equal(report.results[0].status, 'failed');
     assert.equal(report.status, 'incomplete');
     assert.equal(report.results[0].screenshot, null);
     assert.equal(report.results[0].trace, undefined);
     assert.equal(actionHits, 0);
-    assert.ok(report.warnings.some(warning => /после загрузки/.test(warning)));
+    assert.ok(report.warnings.some(warning => /заблокирован до загрузки/.test(warning)));
+  } finally {
+    await Promise.all([new Promise(resolve => origin.close(resolve)), new Promise(resolve => target.close(resolve))]);
+    const shots = path.join(dir, 'screenshots');
+    for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
+    await fs.rmdir(shots).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    await fs.rmdir(dir);
+  }
+});
+
+test('a popup navigation to another origin is blocked before the target is requested', async () => {
+  let targetHits = 0;
+  const target = http.createServer((_req, res) => { targetHits++; res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><title>Other</title>'); });
+  target.listen(0, '127.0.0.1'); await once(target, 'listening');
+  const origin = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(`<!doctype html><title>Origin</title><a id="pop" href="http://127.0.0.1:${target.address().port}/" target="_blank">Open</a>`);
+  });
+  origin.listen(0, '127.0.0.1'); await once(origin, 'listening');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'uxproof-popup-'));
+  try {
+    const report = await runAudit({ runId: 'popup-test', outputDir: dir, project: 'test', baseUrl: `http://127.0.0.1:${origin.address().port}/`,
+      scenarios: [{ id: 's', title: 'popup', steps: [{ type: 'click', name: 'open', target: 'css:#pop' }] }],
+      viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } });
+    assert.equal(targetHits, 0);
+    assert.equal(report.status, 'incomplete');
+    assert.ok(report.warnings.some(warning => /заблокирован до загрузки/.test(warning)));
   } finally {
     await Promise.all([new Promise(resolve => origin.close(resolve)), new Promise(resolve => target.close(resolve))]);
     const shots = path.join(dir, 'screenshots');

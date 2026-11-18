@@ -2,7 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { ConflictError, runAudit } from './audit.mjs';
+import { CancelledError, ConflictError, IdleError, cancelRunningAudit, runAudit } from './audit.mjs';
+import { acquireRunDirectoryLock } from './audit-lock.mjs';
 import { InputError, validateConfig } from './validators.mjs';
 import { isResolvedInside } from './policy.mjs';
 import { isHistoryReport } from './history.mjs';
@@ -17,14 +18,31 @@ const server = http.createServer(async (req,res) => {
   try {
     const u = new URL(req.url,'http://localhost');
     if (!u.pathname.startsWith('/api/')) return json(res,404,{error:'Не найдено'});
+    if (req.method === 'POST' && u.pathname === '/api/cancel') {
+      if (req.headers['x-uxproof-client'] !== '1') return json(res,403,{error:'Нет локального заголовка клиента'});
+      cancelRunningAudit();
+      return json(res,200,{ok:true});
+    }
     if (req.method === 'POST' && u.pathname === '/api/run') {
       if (req.headers['x-uxproof-client'] !== '1') return json(res,403,{error:'Нет локального заголовка клиента'});
       let body='';
       for await (const chunk of req) { body += chunk; if (body.length>200000) return json(res,413,{error:'Слишком большой запрос'}); }
       const config = validateConfig(JSON.parse(body));
       const runId = crypto.randomUUID();
-      const report=await runAudit({...config,runId,outputDir:path.join(root,runId)});
-      return json(res,200,report);
+      const outputDir = path.join(root, runId);
+      const release = acquireRunDirectoryLock(outputDir);
+      const onClose = () => {
+        if (res.headersSent || res.writableFinished) return;
+        try { cancelRunningAudit(); } catch { /* idle after completion */ }
+      };
+      req.on('close', onClose);
+      try {
+        const report=await runAudit({...config,runId,outputDir});
+        return json(res,200,report);
+      } finally {
+        req.off('close', onClose);
+        release();
+      }
     }
     if (req.method==='GET' && u.pathname==='/api/history') {
       const reports=[];
@@ -61,7 +79,7 @@ const server = http.createServer(async (req,res) => {
     return json(res,404,{error:'Не найдено'});
   } catch (e) {
     const message = String(e.message || e);
-    const code = e instanceof InputError ? 400 : e instanceof ConflictError ? 409 : 500;
+    const code = e instanceof InputError ? 400 : (e instanceof ConflictError || e instanceof IdleError || e instanceof CancelledError) ? 409 : 500;
     return json(res, code, {error: message.slice(0, 500)});
   }
 });

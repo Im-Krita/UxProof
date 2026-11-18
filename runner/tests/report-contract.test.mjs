@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateNormalizedReport } from '../report-contract.mjs';
-import { axeObservations, groupObservations, failedStepObservation } from '../findings.mjs';
+import { axeObservations, countedObservation, groupObservations, failedStepObservation } from '../findings.mjs';
 
 function report() {
   const observations = axeObservations({ violation: { id: 'contrast', nodes: [{ target: ['#label'] }] }, pageUrl: 'https://example.test/', scenarioId: 's', viewportId: 'v', runId: 'r' });
@@ -39,4 +39,24 @@ test('rejects mismatched IDs, missing fields, duplicate observations and unsafe 
     const value = report(); mutate(value);
     assert.throws(() => validateNormalizedReport(value));
   }
+});
+
+test('v0.3 accepts runtime, layout, copy and AI observations', () => {
+  const value = report();
+  value.normalizedSchemaVersion = '0.3';
+  value.normalizedCoverage.sources = ['axe', 'runtime', 'layout', 'copy', 'ai'];
+  const extras = [
+    countedObservation({ pageUrl: 'https://example.test/', scenarioId: 's', viewportId: 'v', runId: 'r', ruleId: 'javascript:pageerror', source: 'runtime', classification: 'technical-fact', status: 'confirmed', token: 'count:1' }),
+    countedObservation({ pageUrl: 'https://example.test/', scenarioId: 's', viewportId: 'v', runId: 'r', ruleId: 'layout:viewport-overflow', source: 'layout', classification: 'rule-violation', status: 'confirmed', token: 'overflow:1' }),
+    countedObservation({ pageUrl: 'https://example.test/', scenarioId: 's', viewportId: 'v', runId: 'r', ruleId: 'copy:duplicate-heading', source: 'copy', classification: 'hypothesis', status: 'recommendation', token: 'groups:2' }),
+    countedObservation({ pageUrl: 'https://example.test/', scenarioId: 's', viewportId: 'v', runId: 'r', ruleId: 'ai-ux:slot-1', source: 'ai', classification: 'hypothesis', status: 'recommendation', token: 'slot:1' })
+  ];
+  value.normalizedFindings.push(...groupObservations(extras));
+  assert.equal(validateNormalizedReport(value), true);
+  extras[3].status = 'confirmed';
+  const confirmedAi = report();
+  confirmedAi.normalizedSchemaVersion = '0.3';
+  confirmedAi.normalizedCoverage.sources = ['axe', 'ai'];
+  confirmedAi.normalizedFindings.push(...groupObservations([extras[3]]));
+  assert.throws(() => validateNormalizedReport(confirmedAi));
 });

@@ -1,12 +1,16 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
+use serde::Deserialize;
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    io::{Read, Seek, SeekFrom, Write},
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -33,12 +37,96 @@ impl Drop for AuditGuard<'_> {
 }
 
 static AUDIT_LOCK: AuditLock = AuditLock::new();
+static CHILD_PID: Mutex<Option<u32>> = Mutex::new(None);
 
-fn lock_audit_file(root: &Path) -> Result<File, String> {
-    let file = OpenOptions::new().read(true).write(true).create(true).open(root.join(".audit.lock"))
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConfigLimits {
+    min_scenarios: usize,
+    max_scenarios: usize,
+    min_steps: usize,
+    max_steps: usize,
+    min_viewports: usize,
+    max_viewports: usize,
+    min_width: u64,
+    max_width: u64,
+    min_height: u64,
+    max_height: u64,
+    max_project_len: usize,
+    max_scenario_title: usize,
+    max_step_name: usize,
+    max_target: usize,
+    max_value: usize,
+    step_types: Vec<String>,
+}
+
+fn config_limits() -> ConfigLimits {
+    serde_json::from_str(include_str!("../../runner/schemas/audit-config-limits.json"))
+        .expect("audit-config-limits.json")
+}
+
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+            .map(|output| String::from_utf8_lossy(&output.stdout).contains(&format!("\"{pid}\"")))
+            .unwrap_or(true)
+    }
+    #[cfg(not(windows))]
+    {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(true)
+    }
+}
+
+struct FileLock {
+    file: Option<File>,
+    path: PathBuf,
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        self.file.take();
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn lock_audit_file(root: &Path) -> Result<FileLock, String> {
+    let path = root.join(".audit.lock");
+    let mut file = OpenOptions::new().read(true).write(true).create(true).open(&path)
         .map_err(|e| format!("Не удалось открыть блокировку проверки: {e}"))?;
     file.try_lock().map_err(|e| format!("Не удалось получить блокировку проверки: {e}"))?;
-    Ok(file)
+    file.seek(SeekFrom::Start(0)).map_err(|e| format!("Не удалось прочитать блокировку проверки: {e}"))?;
+    let mut existing = String::new();
+    file.read_to_string(&mut existing).map_err(|e| format!("Не удалось прочитать блокировку проверки: {e}"))?;
+    let owner: u32 = existing.trim().parse().unwrap_or(0);
+    if owner != 0 && owner != std::process::id() && process_alive(owner) {
+        return Err("Уже выполняется другая проверка. Дождитесь её завершения.".into());
+    }
+    file.set_len(0).map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
+    file.seek(SeekFrom::Start(0)).map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
+    write!(&file, "{}", std::process::id()).map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
+    file.flush().map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
+    Ok(FileLock { file: Some(file), path })
+}
+
+fn kill_pid(pid: u32) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
+    }
 }
 
 fn report_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -151,43 +239,44 @@ fn check_navigate(base: &Url, value: &str) -> Result<(), String> {
 }
 
 fn validate(config: &Value) -> Result<(), String> {
+    let limits = config_limits();
     let raw_url = config.get("baseUrl").and_then(Value::as_str).ok_or("Укажите URL проекта")?;
     let base = parse_http_url(raw_url)?;
     if let Some(project) = config.get("project").and_then(Value::as_str) {
-        if project.len() > 200 {
+        if project.len() > limits.max_project_len {
             return Err("Слишком длинное название проекта".into());
         }
     }
     let scenarios = config.get("scenarios").and_then(Value::as_array).ok_or("Нет сценариев")?;
     let viewports = config.get("viewports").and_then(Value::as_array).ok_or("Нет размеров экранов")?;
-    if scenarios.is_empty() || scenarios.len() > 10 || viewports.is_empty() || viewports.len() > 4 {
+    if scenarios.len() < limits.min_scenarios || scenarios.len() > limits.max_scenarios || viewports.len() < limits.min_viewports || viewports.len() > limits.max_viewports {
         return Err("Допускается 1–10 сценариев и 1–4 размера экранов".into());
     }
     for scenario in scenarios {
-        if scenario.get("title").and_then(Value::as_str).unwrap_or("").len() > 200 {
+        if scenario.get("title").and_then(Value::as_str).unwrap_or("").len() > limits.max_scenario_title {
             return Err("Слишком длинное название сценария".into());
         }
         let steps = scenario.get("steps").and_then(Value::as_array).ok_or("У сценария нет шагов")?;
-        if steps.is_empty() || steps.len() > 30 {
+        if steps.len() < limits.min_steps || steps.len() > limits.max_steps {
             return Err("В сценарии должно быть 1–30 шагов".into());
         }
         for step in steps {
             let kind = step.get("type").and_then(Value::as_str).unwrap_or("");
-            if !["click", "fill", "select", "check", "navigate", "expectVisible", "expectHidden", "expectText", "expectValue", "wait"].contains(&kind) {
+            if !limits.step_types.iter().any(|item| item == kind) {
                 return Err(format!("Недопустимая операция: {kind}"));
             }
-            if step.get("name").and_then(Value::as_str).unwrap_or("").len() > 200 {
+            if step.get("name").and_then(Value::as_str).unwrap_or("").len() > limits.max_step_name {
                 return Err("Слишком длинное название шага".into());
             }
             let target = step.get("target").and_then(Value::as_str).unwrap_or("");
-            if target.len() > 500 {
+            if target.len() > limits.max_target {
                 return Err("Слишком длинный селектор".into());
             }
             if kind != "wait" && kind != "navigate" && target.trim().is_empty() {
                 return Err("У шага отсутствует селектор".into());
             }
             let value = step.get("value").and_then(Value::as_str).unwrap_or("");
-            if value.len() > 2000 {
+            if value.len() > limits.max_value {
                 return Err("Слишком длинное значение шага".into());
             }
             if matches!(kind, "expectText" | "expectValue" | "select") && value.trim().is_empty() {
@@ -201,7 +290,7 @@ fn validate(config: &Value) -> Result<(), String> {
     for viewport in viewports {
         let width = viewport.get("width").and_then(Value::as_u64).unwrap_or(0);
         let height = viewport.get("height").and_then(Value::as_u64).unwrap_or(0);
-        if !(320..=3840).contains(&width) || !(400..=2160).contains(&height) {
+        if !(limits.min_width..=limits.max_width).contains(&width) || !(limits.min_height..=limits.max_height).contains(&height) {
             return Err("Недопустимый размер экрана".into());
         }
     }
@@ -253,6 +342,16 @@ fn run_node(script: &Path, input: &[u8], node: &Path, browsers: Option<&Path>) -
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Не удалось запустить Node.js: {e}"))?;
+    *CHILD_PID.lock().map_err(|e| e.to_string())? = Some(child.id());
+    struct ClearPid;
+    impl Drop for ClearPid {
+        fn drop(&mut self) {
+            if let Ok(mut pid) = CHILD_PID.lock() {
+                *pid = None;
+            }
+        }
+    }
+    let _clear_pid = ClearPid;
     let mut stdin = child.stdin.take().ok_or("Нет stdin у процесса Node.js")?;
     let input = input.to_vec();
     let in_handle = thread::spawn(move || stdin.write_all(&input));
@@ -276,21 +375,35 @@ fn run_node(script: &Path, input: &[u8], node: &Path, browsers: Option<&Path>) -
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() > limit => {
                 kill_tree(&mut child);
+                let _ = join_node_io(in_handle, out_handle, err_handle);
                 return Err("Проверка превысила лимит времени и была остановлена".into());
             }
             Ok(None) => thread::sleep(Duration::from_millis(200)),
-            Err(error) => { kill_tree(&mut child); return Err(error.to_string()); }
+            Err(error) => {
+                kill_tree(&mut child);
+                let _ = join_node_io(in_handle, out_handle, err_handle);
+                return Err(error.to_string());
+            }
         }
     };
-    let stdout_buf = out_handle.join().map_err(|_| "Не удалось прочитать stdout".to_string())?;
-    let stderr_buf = err_handle.join().map_err(|_| "Не удалось прочитать stderr".to_string())?;
-    let input_result = in_handle.join().map_err(|_| "Не удалось передать данные runner".to_string())?;
+    let (stdout_buf, stderr_buf, input_result) = join_node_io(in_handle, out_handle, err_handle)?;
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr_buf);
         return Err(format!("Проверка завершилась с ошибкой: {}", stderr.chars().take(1500).collect::<String>()));
     }
     input_result.map_err(|e| format!("Не удалось передать данные runner: {e}"))?;
     Ok(stdout_buf)
+}
+
+fn join_node_io(
+    in_handle: thread::JoinHandle<std::io::Result<()>>,
+    out_handle: thread::JoinHandle<Vec<u8>>,
+    err_handle: thread::JoinHandle<Vec<u8>>,
+) -> Result<(Vec<u8>, Vec<u8>, std::io::Result<()>), String> {
+    let stdout_buf = out_handle.join().map_err(|_| "Не удалось прочитать stdout".to_string())?;
+    let stderr_buf = err_handle.join().map_err(|_| "Не удалось прочитать stderr".to_string())?;
+    let input_result = in_handle.join().map_err(|_| "Не удалось передать данные runner".to_string())?;
+    Ok((stdout_buf, stderr_buf, input_result))
 }
 
 fn reveal(path: &Path) -> Result<(), String> {
@@ -329,6 +442,16 @@ async fn run_audit(app: tauri::AppHandle, config: Value) -> Result<Value, String
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn cancel_audit() -> Result<String, String> {
+    let pid = *CHILD_PID.lock().map_err(|e| e.to_string())?;
+    let Some(pid) = pid else {
+        return Err("Нет выполняющейся проверки".into());
+    };
+    kill_pid(pid);
+    Ok("Проверка остановлена".into())
 }
 
 #[tauri::command]
@@ -382,7 +505,7 @@ fn export_html(app: tauri::AppHandle, run_id: String) -> Result<String, String> 
 
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![run_audit, list_reports, read_screenshot, export_html])
+        .invoke_handler(tauri::generate_handler![run_audit, cancel_audit, list_reports, read_screenshot, export_html])
         .run(tauri::generate_context!())
         .expect("error running UXProof");
 }
@@ -404,6 +527,15 @@ mod tests {
     #[test]
     fn accepts_local_demo() {
         assert!(validate(&config()).is_ok());
+    }
+
+    #[test]
+    fn limits_file_drives_validation() {
+        let limits = config_limits();
+        assert_eq!(limits.max_scenarios, 10);
+        assert_eq!(limits.max_steps, 30);
+        assert_eq!(limits.max_viewports, 4);
+        assert!(cancel_audit().is_err());
     }
 
     #[test]
@@ -510,7 +642,24 @@ mod tests {
         assert!(child("busy"));
         drop(held);
         assert!(child("available"));
-        fs::remove_file(dir.join(".audit.lock")).unwrap();
+        let _ = fs::remove_file(dir.join(".audit.lock"));
+        fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn run_node_returns_after_a_hung_process() {
+        let dir = std::env::temp_dir().join(format!("uxproof-hang-test-{}", Uuid::new_v4()));
+        fs::create_dir(&dir).unwrap();
+        let script = dir.join("hang.mjs");
+        fs::write(&script, "setInterval(() => {}, 1000);\n").unwrap();
+        let previous = std::env::var("UXPROOF_MAX_MS").ok();
+        std::env::set_var("UXPROOF_MAX_MS", "1");
+        let started = Instant::now();
+        let error = run_node(&script, b"{}", Path::new("node"), None).unwrap_err();
+        if let Some(value) = previous { std::env::set_var("UXPROOF_MAX_MS", value); } else { std::env::remove_var("UXPROOF_MAX_MS"); }
+        assert!(error.contains("лимит времени"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(45), "hung node was not joined in time");
+        fs::remove_file(script).unwrap();
         fs::remove_dir(dir).unwrap();
     }
 

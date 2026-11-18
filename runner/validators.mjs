@@ -1,7 +1,8 @@
 import { assertBaseUrlShape, decideRequest } from './policy.mjs';
 import { validateDisabledRules } from './rules.mjs';
+import { LIMITS } from './limits.mjs';
 
-export const STEP_TYPES = new Set(['click','fill','select','check','navigate','expectVisible','expectHidden','expectText','expectValue','wait']);
+export const STEP_TYPES = new Set(LIMITS.stepTypes);
 
 export class InputError extends Error {
   constructor(message) {
@@ -17,19 +18,19 @@ export function validateConfig(config) {
   try { validateDisabledRules(config.options?.disabledRules); } catch { fail('Некорректный список отключённых правил'); }
   if (config.options?.trace !== undefined && !['off', 'on-failure'].includes(config.options.trace)) fail('Некорректный режим trace');
   const parsed = (() => { try { return assertBaseUrlShape(config.baseUrl); } catch (error) { fail(error.message); } })();
-  if (typeof config.project === 'string' && config.project.length > 200) fail('Слишком длинное название проекта');
-  if (!Array.isArray(config.scenarios) || config.scenarios.length < 1 || config.scenarios.length > 10) fail('Нужно от 1 до 10 сценариев');
-  if (!Array.isArray(config.viewports) || config.viewports.length < 1 || config.viewports.length > 4) fail('Нужно от 1 до 4 разрешений экрана');
+  if (typeof config.project === 'string' && config.project.length > LIMITS.maxProjectLen) fail('Слишком длинное название проекта');
+  if (!Array.isArray(config.scenarios) || config.scenarios.length < LIMITS.minScenarios || config.scenarios.length > LIMITS.maxScenarios) fail('Нужно от 1 до 10 сценариев');
+  if (!Array.isArray(config.viewports) || config.viewports.length < LIMITS.minViewports || config.viewports.length > LIMITS.maxViewports) fail('Нужно от 1 до 4 разрешений экрана');
   for (const vp of config.viewports) {
-    if (!Number.isInteger(vp.width) || !Number.isInteger(vp.height) || vp.width < 320 || vp.width > 3840 || vp.height < 400 || vp.height > 2160) fail('Недопустимые размеры экрана');
+    if (!Number.isInteger(vp.width) || !Number.isInteger(vp.height) || vp.width < LIMITS.minWidth || vp.width > LIMITS.maxWidth || vp.height < LIMITS.minHeight || vp.height > LIMITS.maxHeight) fail('Недопустимые размеры экрана');
   }
   for (const scenario of config.scenarios) {
-    if (typeof scenario.title !== 'string' || scenario.title.length > 200 || !Array.isArray(scenario.steps) || !scenario.steps.length || scenario.steps.length > 30) fail('Некорректный сценарий');
+    if (typeof scenario.title !== 'string' || scenario.title.length > LIMITS.maxScenarioTitle || !Array.isArray(scenario.steps) || scenario.steps.length < LIMITS.minSteps || scenario.steps.length > LIMITS.maxSteps) fail('Некорректный сценарий');
     for (const step of scenario.steps) {
       if (!STEP_TYPES.has(step.type)) fail(`Неизвестный шаг: ${step.type}`);
-      if (typeof step.name === 'string' && step.name.length > 200) fail('Слишком длинное название шага');
-      if (typeof step.target === 'string' && step.target.length > 500) fail('Слишком длинный селектор');
-      if (typeof step.value === 'string' && step.value.length > 2000) fail('Слишком длинное значение шага');
+      if (typeof step.name === 'string' && step.name.length > LIMITS.maxStepName) fail('Слишком длинное название шага');
+      if (typeof step.target === 'string' && step.target.length > LIMITS.maxTarget) fail('Слишком длинный селектор');
+      if (typeof step.value === 'string' && step.value.length > LIMITS.maxValue) fail('Слишком длинное значение шага');
       if (step.type !== 'wait' && step.type !== 'navigate' && !String(step.target || '').trim()) fail('У шага отсутствует селектор');
       if (['expectText', 'expectValue', 'select'].includes(step.type) && !String(step.value ?? '').trim()) fail('У шага отсутствует ожидаемое значение');
       if (step.type === 'navigate' && step.value) {
@@ -70,6 +71,18 @@ export function locatorFor(page, query) {
     return page.getByRole(role, name.length ? { name: name.join('|'), exact: true } : {});
   }
   return page.locator(text);
+}
+
+export function humanStepError(step, message) {
+  const text = String(message || '');
+  const name = step?.name || 'шаг';
+  const target = String(step?.target || '').trim();
+  const where = target ? ` «${target}»` : '';
+  if (/timeout/i.test(text) || /exceeded/i.test(text)) return `Не найден элемент${where} за 5,5 с (${name}).`;
+  if (/strict mode/i.test(text) || /resolved to \d+ elements/i.test(text)) return `Селектор${where} указывает на несколько элементов (${name}).`;
+  if (/not visible|hidden/i.test(text)) return `Элемент${where} не виден (${name}).`;
+  if (/not enabled|disabled/i.test(text)) return `Элемент${where} недоступен для действия (${name}).`;
+  return `Шаг «${name}» не выполнен.`;
 }
 
 export async function executeStep(page, step, baseUrl, timeoutMs = 5500) {

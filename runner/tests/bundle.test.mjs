@@ -45,7 +45,15 @@ test('explicit bundle resources run a real audit outside the checkout', { timeou
     const config = JSON.parse(await fs.readFile(new URL('../../src-tauri/tauri.conf.json', import.meta.url), 'utf8'));
     const configDir = fileURLToPath(new URL('../../src-tauri/', import.meta.url));
     for (const [source, target] of Object.entries(config.bundle.resources)) {
-      if (source.includes('*')) continue; // Schemas are not executed by the runner.
+      if (source.includes('*')) {
+        const from = path.resolve(configDir, source.replace(/\/\*[^/]*$/, ''));
+        const dest = path.resolve(realStage, target);
+        const relative = path.relative(realStage, dest);
+        if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw Error('Unsafe bundle path');
+        await fs.mkdir(dest, { recursive: true });
+        await fs.cp(from, dest, { recursive: true });
+        continue;
+      }
       if (!portable && target === 'runtime/') continue; // Tested explicitly with UXPROOF_TEST_PORTABLE=1.
       const dest = path.resolve(realStage, target);
       const relative = path.relative(realStage, dest);

@@ -1,8 +1,8 @@
 import type { AuditConfig, Scenario, StepType, Viewport } from './types';
 export const DEFAULT_VIEWPORTS: Viewport[] = [
-  {id:'desktop',label:'Desktop',width:1440,height:900},
-  {id:'tablet',label:'Tablet',width:768,height:1024},
-  {id:'mobile',label:'Mobile',width:390,height:844}
+  {id:'desktop',label:'Компьютер',width:1440,height:900},
+  {id:'tablet',label:'Планшет',width:768,height:1024},
+  {id:'mobile',label:'Телефон',width:390,height:844}
 ];
 export const STEP_LABELS: Record<StepType,string> = {
   click:'Нажать',fill:'Ввести',select:'Выбрать',check:'Отметить',navigate:'Открыть URL',

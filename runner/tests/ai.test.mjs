@@ -59,6 +59,27 @@ test('ошибка провайдера не содержит ключ', async (
   }
 });
 
+test('Ollama на 127.0.0.2 разрешён как loopback', async () => {
+  const previous = process.env.UXPROOF_OLLAMA_URL;
+  process.env.UXPROOF_OLLAMA_URL = 'http://127.0.0.2:11434';
+  const original = globalThis.fetch;
+  let called = '';
+  globalThis.fetch = async (url) => {
+    called = String(url);
+    return { ok: true, json: async () => ({ message: { content: '{"suggestions":[{"title":"Плотность","description":"Текст слишком плотный","severity":"low"}]}' } }) };
+  };
+  const file = await tempPng();
+  try {
+    const suggestions = await reviewScreenshot({ file, scenario: 'demo', viewport: 'Mobile', findings: [], provider: 'ollama' });
+    assert.match(called, /127\.0\.0\.2/);
+    assert.equal(suggestions.length, 1);
+  } finally {
+    globalThis.fetch = original;
+    if (previous === undefined) delete process.env.UXPROOF_OLLAMA_URL;
+    else process.env.UXPROOF_OLLAMA_URL = previous;
+  }
+});
+
 test('удалённый Ollama запрещён', async () => {
   const previous = process.env.UXPROOF_OLLAMA_URL;
   process.env.UXPROOF_OLLAMA_URL = 'http://example.com:11434';

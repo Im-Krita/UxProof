@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import { runAudit } from './audit.mjs';
+import { acquireRunDirectoryLock } from './audit-lock.mjs';
 
 try {
   if (!process.argv[2]) throw Error('Usage: node runner/cli.mjs path/to/config.json or - for stdin');
@@ -13,8 +14,13 @@ try {
     raw = await fs.readFile(process.argv[2], 'utf8');
   }
   const input = JSON.parse(raw);
-  const report = await runAudit(input);
-  process.stdout.write(JSON.stringify(report));
+  const release = acquireRunDirectoryLock(typeof input?.outputDir === 'string' ? input.outputDir : '');
+  try {
+    const report = await runAudit(input);
+    process.stdout.write(JSON.stringify(report));
+  } finally {
+    release();
+  }
 } catch (error) {
   process.stderr.write(`${String(error?.stack || error)}\n`);
   process.exitCode = 1;

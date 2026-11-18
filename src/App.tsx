@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { Activity, AlertCircle, ArrowLeft, ArrowRight, Check, CheckCheck, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, CircleHelp, ClipboardList, Clock3, Code2, Download, ExternalLink, FileClock, FileDown, FileJson, Globe2, Image as ImageIcon, Info, LayoutDashboard, ListChecks, Loader2, Monitor, MousePointerClick, Play, Plus, RotateCcw, ShieldCheck, Smartphone, Sparkles, Trash2, X, XCircle } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Check, CheckCheck, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, ClipboardList, Clock3, Code2, Download, ExternalLink, FileClock, FileDown, FileJson, Globe2, Image as ImageIcon, Info, LayoutDashboard, ListChecks, Monitor, MousePointerClick, Play, Plus, RotateCcw, ShieldCheck, Smartphone, Sparkles, Trash2, X, XCircle } from 'lucide-react';
 import { DEFAULT_CONFIG, DEFAULT_VIEWPORTS, STEP_LABELS } from './lib/presets';
-import type { AuditConfig, AuditReport, AuditStep, Issue, Panel, Scenario, StepType } from './lib/types';
-import type { NormalizedFinding } from './lib/types';
-import { downloadJson, exportHtml, listReports, runAudit, screenshotUrl } from './lib/bridge';
-import { compareFindings, presentableFindings, recheckedSteps } from '../runner/matching.mjs';
-import { screenshotOutline } from '../runner/geometry-view.mjs';
+import type { AuditConfig, AuditReport, AuditStep, Issue, NormalizedFinding, NormalizedObservation, Panel, Scenario, StepType } from './lib/types';
+import { cancelAudit, downloadJson, exportHtml, listReports, runAudit, screenshotUrl } from './lib/bridge';
+import { compareFindings, displayViewportLabel, findingIssue, presentableFindings, recheckedSteps, screenshotOutline } from './lib/report-view';
+import LIMITS from '@uxproof/audit-config-limits.json';
 
 const STEP_TYPES=Object.keys(STEP_LABELS) as StepType[];
 function clientUrlError(value:string) {
@@ -14,15 +13,38 @@ function clientUrlError(value:string) {
     const url=new URL(value);
     if (!['http:','https:'].includes(url.protocol) || url.username || url.password) return 'Укажите http(s) адрес без логина и пароля';
     const host=url.hostname.toLowerCase();
-    if (host==='169.254.169.254' || host.startsWith('169.254.') || host==='0.0.0.0' || host==='metadata.google.internal') return 'Служебный адрес запрещён';
+    if (host==='169.254.169.254' || host.startsWith('169.254.') || host==='0.0.0.0' || host==='::' || host==='metadata.google.internal' || host==='metadata.goog' || host==='metadata.internal') return 'Служебный адрес запрещён';
     return '';
   } catch { return 'Укажите корректный URL'; }
 }
 const IconForType=({type}:{type:string}) => type==='click'?<MousePointerClick size={16}/>:type.startsWith('expect')?<CheckCheck size={16}/>:<Code2 size={16}/>;
 const formatDate=(date:string)=>{try{return new Date(date).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});}catch{return date;}};
+function sameOriginDifferentPath(a:AuditReport,b:AuditReport){
+ if(a.status!=='completed'||b.status!=='completed')return false;
+ if(!a.comparisonProfileKey||a.comparisonProfileKey!==b.comparisonProfileKey)return false;
+ if(!a.comparisonKey||!b.comparisonKey||a.comparisonKey===b.comparisonKey)return false;
+ try{
+  const left=new URL(a.baseUrl), right=new URL(b.baseUrl);
+  return left.origin===right.origin&&left.pathname!==right.pathname&&left.search===right.search&&left.hash===right.hash&&!left.username&&!left.password&&!right.username&&!right.password;
+ }catch{return false;}
+}
+function shortUrl(value:string){try{const url=new URL(value);return `${url.host}${url.pathname}`;}catch{return value;}}
+function confirmedLabel(count:number){
+ const abs=Math.abs(count), mod10=abs%10, mod100=abs%100;
+ if(mod10===1&&mod100!==11) return `${count} подтверждённое замечание`;
+ if(mod10>=2&&mod10<=4&&(mod100<12||mod100>14)) return `${count} подтверждённых замечания`;
+ return `${count} подтверждённых замечаний`;
+}
+function comparisonLabel(state?:string){
+ if(state==='still-present') return 'Есть в предыдущем прогоне';
+ if(String(state)==='new') return 'Новое наблюдение';
+ if(state==='unverified') return 'Нет совпадения — требуется проверка';
+ if(state==='resolved') return 'Ошибка шага не повторилась';
+ return '';
+}
 function Score({passed,total}:{passed:number,total:number}) { const percent=total?Math.round(passed/total*100):0;return <div className="score"><div className="score-track"><div style={{width:`${percent}%`}}/></div><b>{passed}/{total}</b></div>; }
 function Level({severity}:{severity:string}) {return <span className={`level level-${severity}`}>{severity==='high'?'Высокий':severity==='medium'?'Средний':'Низкий'}</span>}
-function Confidence({status}:{status:string}) {return <span className={`confidence ${status==='confirmed'?'confirmed':'suggestion'}`}>{status==='confirmed'?<Check size={12}/>:<Sparkles size={12}/>} {status==='confirmed'?'Проверено':'Рекомендация'}</span>}
+function Confidence({status}:{status:string}) {return <span className={`confidence ${status==='confirmed'?'confirmed':'suggestion'}`}>{status==='confirmed'?<Check size={12}/>:<Sparkles size={12}/>} {status==='confirmed'?'Подтверждённые':'Рекомендации'}</span>}
 
 export default function App() {
  const [config,setConfig]=useState<AuditConfig>(()=>structuredClone(DEFAULT_CONFIG));
@@ -31,6 +53,8 @@ export default function App() {
  const [busy,setBusy]=useState(false);
  const [report,setReport]=useState<AuditReport|null>(null);
  const [history,setHistory]=useState<AuditReport[]>([]);
+ const [historyStatus,setHistoryStatus]=useState<'loading'|'ready'|'error'>('loading');
+ const [runnerOk,setRunnerOk]=useState(true);
  const [error,setError]=useState('');
  const [notice,setNotice]=useState('');
  const [activeIssue,setActiveIssue]=useState<Issue|null>(null);
@@ -39,22 +63,41 @@ export default function App() {
  const [compareRun,setCompareRun]=useState('');
  const [mapPaths,setMapPaths]=useState(false);
  const [screenshot,setScreenshot]=useState('');
- const [shotFailed,setShotFailed]=useState(false);
+ const [shotStatus,setShotStatus]=useState<'idle'|'loading'|'ready'|'missing'|'failed'>('idle');
  const [shotSize,setShotSize]=useState<{width:number;height:number}|null>(null);
  const importRef=useRef<HTMLInputElement|null>(null);
  const busyRef=useRef(false);
+ const generationRef=useRef(0);
+ const abortRef=useRef<AbortController|null>(null);
  const closeRef=useRef<HTMLButtonElement|null>(null);
  const activeScenario=config.scenarios.find(s=>s.id===activeScenarioId) || config.scenarios[0];
  const currentReport=panel==='history'?history.find(r=>r.runId===selectedRun)||null:report;
  const filteredIssues=useMemo(()=>currentReport?.issues.filter(i=>issueFilter==='all'||i.status===issueFilter)||[],[currentReport,issueFilter]);
- useEffect(()=>{listReports().then(setHistory).catch(()=>{});},[]);
+ const loadHistory=async(opts?:{openLatest?:boolean})=>{
+   try{
+     const records=await listReports();
+     setHistory(records);
+     setHistoryStatus('ready');
+     setRunnerOk(true);
+     if(opts?.openLatest && !busyRef.current){
+       const latest=records.find(item=>item.status==='completed');
+       if(latest) setReport(prev=>prev??latest);
+     }
+   }catch(e){
+     setHistoryStatus('error');
+     setRunnerOk(false);
+     setError(String(e instanceof Error?e.message:e));
+   }
+ };
+ useEffect(()=>{void loadHistory({openLatest:true});},[]);
  useEffect(()=>{
    setScreenshot('');
-   setShotFailed(false);
    setShotSize(null);
-   if(!activeIssue?.screenshot || !currentReport) return;
+   if(!activeIssue || !currentReport){setShotStatus('idle');return;}
+   if(!activeIssue.screenshot){setShotStatus('missing');return;}
+   setShotStatus('loading');
    let live=true;
-   screenshotUrl(currentReport.runId,activeIssue.screenshot).then(u=>{if(live)setScreenshot(u);}).catch(()=>{});
+   screenshotUrl(currentReport.runId,activeIssue.screenshot).then(u=>{if(live)setScreenshot(u);}).catch(()=>{if(live)setShotStatus('failed');});
    return ()=>{live=false;};
  },[activeIssue,currentReport]);
  useEffect(()=>{
@@ -89,13 +132,36 @@ export default function App() {
    if(urlError){setError(urlError);return;}
    if(!config.scenarios.length || config.scenarios.some(s=>!s.steps.length)){setError('Добавьте хотя бы один шаг');return;}
    busyRef.current=true;
+   const generation=++generationRef.current;
+   abortRef.current?.abort();
+   const abort=new AbortController();
+   abortRef.current=abort;
    setError('');setNotice('');setBusy(true);
    try{
-     const r=await runAudit(config);
+     const r=await runAudit(config, abort.signal);
+     if(generation!==generationRef.current) return;
      setReport(r);setCompareRun('');setMapPaths(false);setPanel('results');setIssueFilter('all');setActiveIssue(null);
      setHistory(prev=>[r,...prev.filter(h=>h.runId!==r.runId)].slice(0,30));
-   }catch(e){setError(String(e instanceof Error?e.message:e));}
-   finally{busyRef.current=false;setBusy(false);}
+     setHistoryStatus('ready');setRunnerOk(true);
+   }catch(e){
+     if(generation!==generationRef.current) return;
+     if((e as {name?:string}).name==='AbortError'){
+       if((e as {timedOut?:boolean}).timedOut){
+         try{await cancelAudit();}catch{/* runner may already be idle */}
+         setError(String(e instanceof Error?e.message:e));
+       }
+       return;
+     }
+     setError(String(e instanceof Error?e.message:e));
+     setRunnerOk(false);
+   }
+   finally{if(generation===generationRef.current){busyRef.current=false;setBusy(false);}}
+ };
+ const stop=async()=>{
+   generationRef.current++;
+   abortRef.current?.abort();
+   try{await cancelAudit();}catch(e){setError(String(e instanceof Error?e.message:e));}
+   busyRef.current=false;setBusy(false);
  };
  const exportReport=async(r:AuditReport)=>{
    try{const info=await exportHtml(r.runId);setNotice(`HTML-отчёт: ${info}`);}catch(e){setError(String(e));}
@@ -105,11 +171,11 @@ export default function App() {
    try {
      if(file.size>2_000_000) throw Error('Файл проекта слишком большой');
      const value=JSON.parse(await file.text()) as AuditConfig;
-     if(typeof value.baseUrl!=='string'||!Array.isArray(value.scenarios)||!Array.isArray(value.viewports)||!value.scenarios.length||!value.viewports.length||value.scenarios.length>10||value.viewports.length>4) throw Error('Некорректный формат проекта');
+     if(typeof value.baseUrl!=='string'||!Array.isArray(value.scenarios)||!Array.isArray(value.viewports)||value.scenarios.length<LIMITS.minScenarios||value.viewports.length<LIMITS.minViewports||value.scenarios.length>LIMITS.maxScenarios||value.viewports.length>LIMITS.maxViewports) throw Error('Некорректный формат проекта');
      const urlError=clientUrlError(value.baseUrl);
      if(urlError) throw Error(urlError);
      for(const scenario of value.scenarios){
-       if(!scenario || typeof scenario.title!=='string' || !Array.isArray(scenario.steps) || !scenario.steps.length || scenario.steps.length>30) throw Error('Некорректный сценарий');
+       if(!scenario || typeof scenario.title!=='string' || !Array.isArray(scenario.steps) || scenario.steps.length<LIMITS.minSteps || scenario.steps.length>LIMITS.maxSteps) throw Error('Некорректный сценарий');
        for(const step of scenario.steps){ if(!step || !STEP_TYPES.includes(step.type)) throw Error(`Неизвестный шаг: ${step?.type ?? ''}`); }
      }
      const aiProvider: 'openai' | 'ollama' = value.options?.aiProvider==='ollama' ? 'ollama' : 'openai';
@@ -123,43 +189,48 @@ export default function App() {
    event.target.value='';
  };
  const menu=[{id:'scenarios' as Panel,label:'Сценарии',icon:ListChecks},{id:'results' as Panel,label:'Результаты',icon:LayoutDashboard},{id:'history' as Panel,label:'История проверок',icon:FileClock}];
- const baselines=report?history.filter(h=>h.runId!==report.runId):[];
- const previous=compareRun?baselines.find(h=>h.runId===compareRun):baselines.find(h=>!!report?.comparisonKey&&h.comparisonKey===report.comparisonKey&&h.status==='completed'&&report.status==='completed');
+ const compareSource=panel==='history'?currentReport:report;
+ const baselines=compareSource?history.filter(h=>h.runId!==compareSource.runId):[];
+ const manual=compareRun?baselines.find(h=>h.runId===compareRun):undefined;
+ const exactPrevious=!manual?baselines.find(h=>!!compareSource?.comparisonKey&&h.comparisonKey===compareSource.comparisonKey&&h.status==='completed'&&compareSource.status==='completed'):undefined;
+ const pathOffer=compareSource&&manual&&sameOriginDifferentPath(manual,compareSource)?manual:(!manual&&!exactPrevious&&compareSource?baselines.find(h=>sameOriginDifferentPath(h,compareSource)):undefined);
+ const settingsMismatch=!!(compareSource&&manual&&manual.comparisonKey!==compareSource.comparisonKey&&!(pathOffer&&pathOffer.runId===manual.runId));
+ const previous=manual&&compareSource&&manual.comparisonKey===compareSource.comparisonKey?manual:exactPrevious||(mapPaths?pathOffer:undefined)||(settingsMismatch?manual:undefined);
+ const comparisonControls=compareSource&&baselines.length>0&&<div className="comparison-controls"><label htmlFor="comparison-run">Сравнить с проверкой</label><select id="comparison-run" value={compareRun} onChange={e=>{setCompareRun(e.target.value);setMapPaths(false)}}><option value="">Автоматически: такой же адрес и настройки</option>{baselines.map(h=><option key={h.runId} value={h.runId}>{formatDate(h.startedAt)} · {h.project} · {h.baseUrl}</option>)}</select>{pathOffer&&<label><input type="checkbox" checked={mapPaths} onChange={e=>setMapPaths(e.target.checked)}/> Путь другой. Сравнить как один сайт?</label>}</div>;
  const outline=currentReport&&activeIssue?.screenshot&&shotSize?screenshotOutline(currentReport,activeIssue.screenshot,shotSize.width,shotSize.height):null;
  return <div className="app-shell">
    <aside className="sidebar">
-     <div className="logo"><div className="logo-symbol"><ShieldCheck size={23} strokeWidth={2.4}/></div><div><div className="logo-name">UXProof</div><div className="logo-sub">Quality workspace</div></div><span className="version">BETA</span></div>
+     <div className="logo"><div className="logo-symbol"><ShieldCheck size={23} strokeWidth={2.4}/></div><div><div className="logo-name">UXProof</div></div><span className="version">BETA</span></div>
      <div className="nav-title">РАБОЧЕЕ ПРОСТРАНСТВО</div>
      <nav className="side-nav">{menu.map(m=><button key={m.id} type="button" aria-current={panel===m.id?'page':undefined} className={`nav-item ${panel===m.id?'active':''}`} onClick={()=>{setPanel(m.id);setActiveIssue(null);setError('');}}><m.icon size={17}/><span className="nav-label">{m.label}</span>{m.id==='history'&&history.length>0?<span className="nav-count" aria-hidden="true">{history.length}</span>:null}</button>)}</nav>
-     <div className="sidebar-bottom"><div className="sidebar-divider"/><div className="mode-info"><div className="mode-icon"><Activity size={16}/></div><div><b>Локальный анализ</b><span>Браузерные проверки на устройстве</span></div></div><div className="side-hint"><CircleHelp size={15}/><span>UXProof проверяет сценарии, а не только скриншоты.</span></div></div>
    </aside>
    <div className="main-column">
-     <header className="topbar"><div className="crumb">Workspace <ChevronRight size={14}/> <b>{panel==='scenarios'?'Сценарии':panel==='results'?'Результаты':'История'}</b></div><div className="top-actions"><div className="online-dot"/> <span>Локальный проект</span><span className="top-separator"/><span className="version-top">v0.1.0</span></div></header>
+     <header className="topbar"><div className="top-actions"><span>{busy?`Проверка: ${activeScenario?.title}`:runnerOk?'Локальный проект':'Runner не запущен'}</span>{busy&&<button className="btn secondary" type="button" onClick={stop}>Остановить</button>}<span className="top-separator"/><span className="version-top">v0.1.0</span></div></header>
      <main className="workspace">
        {error&&<div className="alert error"><AlertCircle size={18}/><span>{error}</span><button aria-label="Закрыть ошибку" onClick={()=>setError('')}><X size={17}/></button></div>}
        {notice&&<div className="alert notice"><Info size={17}/><span>{notice}</span><button aria-label="Закрыть сообщение" onClick={()=>setNotice('')}><X size={17}/></button></div>}
        {panel==='scenarios'&&<>
-         <div className="page-head"><div><div className="eyebrow">ПРОЕКТ / НАСТРОЙКА ПРОВЕРКИ</div><h1>Сценарии проверки</h1><p>Собери путь пользователя. UXProof повторит его в настоящем браузере и сохранит результат каждого шага.</p></div><button className="btn primary run-button" type="button" aria-busy={busy} disabled={busy} onClick={start}>{busy?<Loader2 className="spin" size={18}/>:<Play size={17} fill="currentColor"/>}{busy?'Проверка выполняется…':'Запустить аудит'}<ArrowRight size={17}/></button></div>
+         <div className="page-head"><div><h1>Сценарии проверки</h1>{busy&&<p>Проверка: {activeScenario?.title}</p>}</div>{busy?<button className="btn secondary run-button" type="button" onClick={stop}>Остановить</button>:<button className="btn primary run-button" type="button" aria-busy={busy} disabled={busy} onClick={start}><Play size={17} fill="currentColor"/>Запустить аудит<ArrowRight size={17}/></button>}</div>
          <div className="config-card">
            <div className="project-row"><div className="project-monogram"><Globe2 size={21}/></div><div className="project-fields"><label className="field-label" htmlFor="project-name">Название проекта</label><input id="project-name" className="input project-name" value={config.project} onChange={e=>setConfig({...config,project:e.target.value})} placeholder="Название проекта"/></div><div className="project-fields url-field"><label className="field-label" htmlFor="project-url">Адрес приложения</label><input id="project-url" className="input" value={config.baseUrl} onChange={e=>setConfig({...config,baseUrl:e.target.value})} placeholder="http://localhost:3000"/></div></div>
            <div className="project-foot"><div><CheckCircle2 size={15}/><span>Web-приложения по HTTP/HTTPS</span></div><div className="muted-actions"><button onClick={()=>importRef.current?.click()}><FileJson size={14}/> Импорт JSON</button><button onClick={()=>downloadJson('uxproof-project.json',config)}><Download size={14}/> Экспорт проекта</button><input ref={importRef} type="file" accept=".json,application/json" hidden onChange={importProject}/></div></div>
          </div>
          <div className="editor-grid"><section className="scenarios-list panel-card"><div className="panel-title"><div><h2>Пользовательские сценарии</h2><span>{config.scenarios.length} из 10</span></div><button className="icon-btn" disabled={config.scenarios.length>=10} title="Добавить сценарий" onClick={addScenario}><Plus size={19}/></button></div>
            <div className="scenario-list">{config.scenarios.map((s,i)=><button key={s.id} onClick={()=>setActiveScenarioId(s.id)} className={`scenario-item ${activeScenario?.id===s.id?'selected':''}`}><span className="scenario-num">{String(i+1).padStart(2,'0')}</span><span className="scenario-label"><b>{s.title}</b><small>{s.steps.length} шагов</small></span><ChevronRight size={16}/></button>)}</div>
-           <div className="tip"><Info size={16}/><span>Начни с 3 готовых сценариев на тестовом Relay. Менять шаги можно справа.</span></div></section>
+           </section>
            <section className="step-editor panel-card">{activeScenario?<><div className="panel-title"><div><h2>Редактор сценария</h2><span>Действия выполняются по порядку</span></div><button className="icon-btn delete-btn" disabled={config.scenarios.length<=1} title="Удалить сценарий" onClick={deleteScenario}><Trash2 size={17}/></button></div>
-             <div className="scenario-edit-head"><label className="field-label" htmlFor="scenario-title">Название</label><input id="scenario-title" className="input" value={activeScenario.title} onChange={e=>updateScenario(s=>({...s,title:e.target.value}))}/><label className="field-label extra-label" htmlFor="scenario-desc">Описание</label><input id="scenario-desc" className="input" value={activeScenario.description} onChange={e=>updateScenario(s=>({...s,description:e.target.value}))} placeholder="Что должен сделать пользователь?"/></div>
+             <div className="scenario-edit-head"><label className="field-label" htmlFor="scenario-title">Название</label><input id="scenario-title" className="input" value={activeScenario.title} onChange={e=>updateScenario(s=>({...s,title:e.target.value}))}/><label className="field-label extra-label" htmlFor="scenario-desc">Заметка, на проверку не влияет</label><input id="scenario-desc" className="input" value={activeScenario.description} onChange={e=>updateScenario(s=>({...s,description:e.target.value}))} placeholder="Необязательно"/></div>
              <div className="steps-label"><span>ШАГИ АВТОМАТИЗАЦИИ</span><span>{activeScenario.steps.length} / 30</span></div>
-             <div className="steps-list">{activeScenario.steps.map((step,i)=><div className="step-row" key={i}><div className="step-index">{String(i+1).padStart(2,'0')}</div><div className="step-content"><div className="step-top"><div className="step-icon"><IconForType type={step.type}/></div><input aria-label={`Название шага ${i+1}`} className="step-name" value={step.name} onChange={e=>updateStep(i,{name:e.target.value})}/><div className="step-actions"><button type="button" aria-label={`Переместить шаг ${i+1} вверх`} title="Выше" disabled={i===0} onClick={()=>moveStep(i,-1)}><ChevronUp size={14}/></button><button type="button" aria-label={`Переместить шаг ${i+1} вниз`} title="Ниже" disabled={i===activeScenario.steps.length-1} onClick={()=>moveStep(i,1)}><ChevronDown size={14}/></button></div><button className="mini-remove" type="button" aria-label={`Удалить шаг ${i+1}`} title="Удалить шаг" disabled={activeScenario.steps.length<=1} onClick={()=>updateScenario(s=>({...s,steps:s.steps.filter((_,index)=>index!==i)}))}><X size={15}/></button></div><div className="step-fields"><select aria-label={`Тип шага ${i+1}`} value={step.type} onChange={e=>updateStep(i,{type:e.target.value as StepType})}>{STEP_TYPES.map(type=><option value={type} key={type}>{STEP_LABELS[type]}</option>)}</select><input aria-label={`Селектор шага ${i+1}`} placeholder={step.type==='navigate'||step.type==='wait'?'Селектор не нужен':'css:#button / role:button|ОК'} value={step.target} onChange={e=>updateStep(i,{target:e.target.value})} disabled={step.type==='wait'||step.type==='navigate'}/>{['fill','select','navigate','expectText','expectValue','wait'].includes(step.type)&&<input aria-label={`Значение шага ${i+1}`} className="value-input" placeholder="Значение" value={step.value} onChange={e=>updateStep(i,{value:e.target.value})}/>}</div></div></div>)}</div>
+             <div className="steps-list">{activeScenario.steps.map((step,i)=><div className="step-row" key={i}><div className="step-index">{String(i+1).padStart(2,'0')}</div><div className="step-content"><div className="step-top"><div className="step-icon"><IconForType type={step.type}/></div><input aria-label={`Название шага ${i+1}`} className="step-name" value={step.name} onChange={e=>updateStep(i,{name:e.target.value})}/><div className="step-actions"><button type="button" aria-label={`Переместить шаг ${i+1} вверх`} title="Выше" disabled={i===0} onClick={()=>moveStep(i,-1)}><ChevronUp size={14}/></button><button type="button" aria-label={`Переместить шаг ${i+1} вниз`} title="Ниже" disabled={i===activeScenario.steps.length-1} onClick={()=>moveStep(i,1)}><ChevronDown size={14}/></button></div><button className="mini-remove" type="button" aria-label={`Удалить шаг ${i+1}`} title="Удалить шаг" disabled={activeScenario.steps.length<=1} onClick={()=>updateScenario(s=>({...s,steps:s.steps.filter((_,index)=>index!==i)}))}><X size={15}/></button></div><div className="step-fields"><select aria-label={`Тип шага ${i+1}`} value={step.type} onChange={e=>updateStep(i,{type:e.target.value as StepType})}>{STEP_TYPES.map(type=><option value={type} key={type}>{STEP_LABELS[type]}</option>)}</select><input aria-label={`Селектор шага ${i+1}`} placeholder={step.type==='navigate'||step.type==='wait'?'Селектор не нужен':'role:button|Имя'} value={step.target} onChange={e=>updateStep(i,{target:e.target.value})} disabled={step.type==='wait'||step.type==='navigate'}/>{['fill','select','navigate','expectText','expectValue','wait'].includes(step.type)&&<input aria-label={`Значение шага ${i+1}`} className="value-input" placeholder={step.type==='navigate'?'URL или путь':step.type==='wait'?'Пауза, мс':'Значение'} value={step.value} onChange={e=>updateStep(i,{value:e.target.value})}/>}</div><p className="step-hint">{step.type==='navigate'||step.type==='wait'?'Селектор не нужен. Для перехода укажите URL, для паузы — миллисекунды.':'role:button|Имя · css:#id · label:Подпись'}</p></div></div>)}</div>
              <button className="add-step" disabled={activeScenario.steps.length>=30} onClick={()=>updateScenario(s=>({...s,steps:[...s.steps,{name:'Новый шаг',type:'expectVisible',target:'css:main',value:''}]}))}><Plus size={17}/> Добавить шаг</button>
            </>:null}</section></div>
-         <section className="bottom-config panel-card"><div className="panel-title"><div><h2>Среда проверки</h2><span>Выбери размеры экрана и дополнительные проверки</span></div></div><div className="environment-grid"><div className="env-area"><div className="section-cap">РАЗРЕШЕНИЯ ЭКРАНА</div><div className="viewports">{DEFAULT_VIEWPORTS.map(v=>{const chosen=config.viewports.some(item=>item.id===v.id);return <button type="button" key={v.id} aria-pressed={chosen} className={`viewport-tile ${chosen?'checked':''}`} onClick={()=>setConfig(prev=>({...prev,viewports:chosen?(prev.viewports.length>1?prev.viewports.filter(p=>p.id!==v.id):prev.viewports):[...prev.viewports,v].sort((a,b)=>DEFAULT_VIEWPORTS.findIndex(p=>p.id===a.id)-DEFAULT_VIEWPORTS.findIndex(p=>p.id===b.id))}))}>{v.id==='mobile'?<Smartphone size={22}/>:<Monitor size={22}/>}<span><b>{v.label}</b><small>{v.width} × {v.height}</small></span><span className="check-box">{chosen&&<Check size={13}/>}</span></button>})}</div></div><div className="env-ai"><div className="section-cap">ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ</div><label className="ai-toggle"><div className="ai-icon"><Sparkles size={20}/></div><div><b>Рекомендации ИИ</b><span>Оценка скриншотов мультимодальной моделью</span></div><input type="checkbox" checked={config.options.enableAI} onChange={e=>setConfig({...config,options:{...config.options,enableAI:e.target.checked}})}/><span className="switch"/></label>{config.options.enableAI&&<div className="provider-field"><label htmlFor="ai-provider">ИИ-провайдер</label><select id="ai-provider" value={config.options.aiProvider} onChange={e=>setConfig({...config,options:{...config.options,aiProvider:e.target.value as 'openai'|'ollama'}})}><option value="openai">OpenAI API (облачный)</option><option value="ollama">Ollama (локальный)</option></select></div>}<p className="ai-warning"><Info size={15}/> Для OpenAI скриншоты передаются облачному API, нужен OPENAI_API_KEY. Ollama обрабатывает локально, если установлена мультимодальная модель. По умолчанию отключено.</p><label className="trace-toggle"><input type="checkbox" checked={config.options.trace==='on-failure'} onChange={e=>setConfig({...config,options:{...config.options,trace:e.target.checked?'on-failure':'off'}})}/> Сохранять trace при ошибке</label><p className="ai-warning">Trace может содержать текст страницы, значения полей и сетевые данные. Включайте только для отладки; файл сохраняется локально.</p></div></div></section>
+         <section className="bottom-config panel-card"><div className="panel-title"><div><h2>Среда проверки</h2><span>Выбери размеры экрана и дополнительные проверки</span></div></div><div className="environment-grid"><div className="env-area"><div className="section-cap">РАЗРЕШЕНИЯ ЭКРАНА</div><div className="viewports">{DEFAULT_VIEWPORTS.map(v=>{const chosen=config.viewports.some(item=>item.id===v.id);return <button type="button" key={v.id} aria-pressed={chosen} className={`viewport-tile ${chosen?'checked':''}`} onClick={()=>setConfig(prev=>({...prev,viewports:chosen?(prev.viewports.length>1?prev.viewports.filter(p=>p.id!==v.id):prev.viewports):[...prev.viewports,v].sort((a,b)=>DEFAULT_VIEWPORTS.findIndex(p=>p.id===a.id)-DEFAULT_VIEWPORTS.findIndex(p=>p.id===b.id))}))}>{v.id==='mobile'?<Smartphone size={22}/>:<Monitor size={22}/>}<span><b>{v.label}</b><small>{v.width} × {v.height}</small></span><span className="check-box">{chosen&&<Check size={13}/>}</span></button>})}</div></div><div className="env-ai"><div className="section-cap">ДОПОЛНИТЕЛЬНЫЙ АНАЛИЗ</div><label className="ai-toggle"><div className="ai-icon"><Sparkles size={20}/></div><div><b>Рекомендации ИИ</b><span>Оценка скриншотов мультимодальной моделью</span></div><input type="checkbox" checked={config.options.enableAI} onChange={e=>setConfig({...config,options:{...config.options,enableAI:e.target.checked}})}/><span className="switch" aria-hidden="true"/></label>{config.options.enableAI&&<div className="provider-field"><label htmlFor="ai-provider">ИИ-провайдер</label><select id="ai-provider" value={config.options.aiProvider} onChange={e=>setConfig({...config,options:{...config.options,aiProvider:e.target.value as 'openai'|'ollama'}})}><option value="openai">OpenAI API (облачный)</option><option value="ollama">Ollama (локальный)</option></select></div>}<p className="ai-warning"><Info size={15}/> Для OpenAI скриншоты передаются облачному API, нужен OPENAI_API_KEY. Ollama обрабатывает локально, если установлена мультимодальная модель. По умолчанию отключено.</p><label className="trace-toggle"><input type="checkbox" checked={config.options.trace==='on-failure'} onChange={e=>setConfig({...config,options:{...config.options,trace:e.target.checked?'on-failure':'off'}})}/> Сохранять trace при ошибке</label><p className="ai-warning">Trace может содержать текст страницы, значения полей и сетевые данные. Включайте только для отладки; файл сохраняется локально.</p><p className="ai-warning">Лимит 10 000 считает рукопожатия прокси (HTTP и CONNECT), а не запросы внутри HTTPS.</p></div></div></section>
        </>}
-       {panel==='results'&&<>{report?<>{baselines.length>0&&<div className="comparison-controls"><label htmlFor="comparison-run">Сравнить с проверкой</label><select id="comparison-run" value={compareRun} onChange={e=>{setCompareRun(e.target.value);setMapPaths(false)}}><option value="">Автоматически: такой же адрес и настройки</option>{baselines.map(h=><option key={h.runId} value={h.runId}>{formatDate(h.startedAt)} · {h.project} · {h.baseUrl}</option>)}</select>{compareRun&&previous&&previous.comparisonKey!==report.comparisonKey&&<label><input type="checkbox" checked={mapPaths} onChange={e=>setMapPaths(e.target.checked)}/> Сопоставить эти пути одного сайта</label>}</div>}<ReportSection report={report} previous={previous} mapPaths={mapPaths} issues={filteredIssues} issueFilter={issueFilter} setIssueFilter={setIssueFilter} onIssue={setActiveIssue} onExport={()=>exportReport(report)} onJson={()=>downloadJson(`uxproof-${report.runId}.json`,report)} onBack={()=>setPanel('scenarios')}/></>:<EmptyState title="Пока нет результатов" description="Запусти первый аудит — здесь появятся пройденные сценарии, воспроизводимые ошибки и скриншоты." action="Настроить проверку" onAction={()=>setPanel('scenarios')}/>}</>}
-       {panel==='history'&&<><div className="page-head"><div><div className="eyebrow">ЛОКАЛЬНО СОХРАНЁННЫЕ ОТЧЁТЫ</div><h1>История проверок</h1><p>Прошлые запуски сохраняются локально. Выбери отчет, чтобы увидеть результаты.</p></div><button className="btn secondary" onClick={()=>listReports().then(setHistory).catch(e=>setError(String(e)))}><RotateCcw size={16}/> Обновить</button></div>{history.length?<div className="history-layout"><div className="panel-card history-list">{history.map(r=><button key={r.runId} className={`history-entry ${selectedRun===r.runId?'selected':''}`} onClick={()=>{setSelectedRun(r.runId);setIssueFilter('all');setActiveIssue(null);}}><div className="history-top"><span>{formatDate(r.startedAt)}</span><span>{r.summary.passedRuns}/{r.summary.totalRuns}</span></div><b>{r.project}</b><small>{r.summary.confirmedIssues} подтверждённых замечаний</small></button>)}</div><div>{currentReport?<ReportSection report={currentReport} issues={filteredIssues} issueFilter={issueFilter} setIssueFilter={setIssueFilter} onIssue={setActiveIssue} onExport={()=>exportReport(currentReport)} onJson={()=>downloadJson(`uxproof-${currentReport.runId}.json`,currentReport)} onBack={()=>setPanel('scenarios')} compact/>:<div className="panel-card history-placeholder"><FileClock size={35}/><b>Выбери проверку слева</b><span>Отчет откроется здесь.</span></div>}</div></div>:<EmptyState title="История пуста" description="После первого реального запуска отчёт появится в этом разделе." action="Новый аудит" onAction={()=>setPanel('scenarios')}/>}</>}
+       {panel==='results'&&<>{report?<>{comparisonControls}<ReportSection report={report} previous={previous} mapPaths={mapPaths} issues={filteredIssues} issueFilter={issueFilter} setIssueFilter={setIssueFilter} onIssue={setActiveIssue} onExport={()=>exportReport(report)} onJson={()=>downloadJson(`uxproof-${report.runId}.json`,report)} onBack={()=>setPanel('scenarios')}/></>:<EmptyState title="Пока нет результатов" description="Запусти первый аудит — здесь появятся пройденные сценарии, воспроизводимые ошибки и скриншоты." action="Настроить проверку" onAction={()=>setPanel('scenarios')}/>}</>}
+       {panel==='history'&&<><div className="page-head"><div><h1>История проверок</h1></div><button className="btn secondary" onClick={()=>loadHistory().catch(()=>{})}><RotateCcw size={16}/> Обновить</button></div>{historyStatus==='loading'?<p>Загрузка истории…</p>:historyStatus==='error'?<EmptyState title="История не загрузилась" description="Локальный runner недоступен или ответ повреждён." action="Обновить" onAction={()=>void loadHistory()}/>:history.length?<div className="history-layout"><div className="panel-card history-list">{history.map(r=><button key={r.runId} className={`history-entry ${selectedRun===r.runId?'selected':''}`} onClick={()=>{setSelectedRun(r.runId);setCompareRun('');setMapPaths(false);setIssueFilter('all');setActiveIssue(null);}}><div className="history-top"><span>{formatDate(r.startedAt)}</span><span>{r.summary.passedRuns}/{r.summary.totalRuns}</span></div><b>{r.project}</b><small>{shortUrl(r.baseUrl)}</small><small>{confirmedLabel(r.summary.confirmedIssues)}</small></button>)}</div><div>{currentReport?<>{comparisonControls}<ReportSection report={currentReport} previous={previous} mapPaths={mapPaths} issues={filteredIssues} issueFilter={issueFilter} setIssueFilter={setIssueFilter} onIssue={setActiveIssue} onExport={()=>exportReport(currentReport)} onJson={()=>downloadJson(`uxproof-${currentReport.runId}.json`,currentReport)} onBack={()=>setPanel('scenarios')} compact/></>:<div className="panel-card history-placeholder"><FileClock size={35}/><b>Выбери проверку слева</b><span>Отчет откроется здесь.</span></div>}</div></div>:<EmptyState title="История пуста" description="После первого реального запуска отчёт появится в этом разделе." action="Новый аудит" onAction={()=>setPanel('scenarios')}/>}</>}
      </main>
    </div>
-   {activeIssue&&currentReport&&<div className="modal-overlay" onClick={()=>setActiveIssue(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="issue-title" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><Confidence status={activeIssue.status}/><h2 id="issue-title">{activeIssue.title}</h2><div className="modal-sub"><Level severity={activeIssue.severity}/><span>{activeIssue.scenario} · {activeIssue.viewport}</span></div></div><button ref={closeRef} className="icon-btn" type="button" aria-label="Закрыть" onClick={()=>setActiveIssue(null)}><X size={20}/></button></div><div className="modal-body"><h3>Что обнаружено</h3><p>{activeIssue.description}</p>{activeIssue.reproduction&&<><h3>Как воспроизвести</h3><p className="reproduction">{activeIssue.reproduction}</p></>}{activeIssue.helpUrl?.startsWith('https://')&&<p><a href={activeIssue.helpUrl} target="_blank" rel="noreferrer">Описание правила axe-core <ExternalLink size={13}/></a></p>}<h3>Доказательство</h3>{screenshot&&!shotFailed?<div className="evidence-frame"><img className="evidence-image" src={screenshot} alt={`Скриншот проверки: ${activeIssue.scenario}`} onLoad={e=>setShotSize({width:e.currentTarget.naturalWidth,height:e.currentTarget.naturalHeight})} onError={()=>setShotFailed(true)}/>{outline&&<span className="evidence-outline" aria-label="Приблизительные границы проверенного элемента" style={{left:`${outline.left}%`,top:`${outline.top}%`,width:`${outline.width}%`,height:`${outline.height}%`}}/>}</div>:<div className="no-image"><ImageIcon size={20}/> Скриншот отсутствует или загружается</div>}{outline&&<p className="evidence-note">Рамка показывает положение элемента; страница могла измениться во время снимка.</p>}<p className="evidence-note">{activeIssue.status==='recommendation'?(activeIssue.kind==='ai-ux'?'Это предположение ИИ — подтвердите его вручную.':'Это гипотеза правила — проверьте её контекст вручную.'):'Запись сформирована автоматическим тестом; при необходимости проверьте контекст вручную.'}</p></div></div></div>}
+   {activeIssue&&currentReport&&<div className="modal-overlay" onClick={()=>setActiveIssue(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="issue-title" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><Confidence status={activeIssue.status}/><h2 id="issue-title">{activeIssue.title}</h2><div className="modal-sub"><Level severity={activeIssue.severity}/><span>{activeIssue.scenario} · {displayViewportLabel(activeIssue.viewportId,activeIssue.viewport)}</span></div></div><button ref={closeRef} className="icon-btn" type="button" aria-label="Закрыть" onClick={()=>setActiveIssue(null)}><X size={20}/></button></div><div className="modal-body"><h3>Что обнаружено</h3><p>{activeIssue.description}</p>{activeIssue.reproduction&&<><h3>Как воспроизвести</h3><p className="reproduction">{activeIssue.reproduction}</p></>}{activeIssue.helpUrl?.startsWith('https://')&&<p><a href={activeIssue.helpUrl} target="_blank" rel="noreferrer">Описание правила axe-core <ExternalLink size={13}/></a></p>}<h3>Доказательство</h3>{screenshot&&shotStatus!=='failed'&&shotStatus!=='missing'?<div className="evidence-frame"><img className="evidence-image" src={screenshot} alt={`Скриншот проверки: ${activeIssue.scenario}`} onLoad={e=>{setShotSize({width:e.currentTarget.naturalWidth,height:e.currentTarget.naturalHeight});setShotStatus('ready');}} onError={()=>setShotStatus('failed')}/>{outline&&<span className="evidence-outline" aria-label="Приблизительные границы проверенного элемента" style={{left:`${outline.left}%`,top:`${outline.top}%`,width:`${outline.width}%`,height:`${outline.height}%`}}/>}</div>:<div className="no-image"><ImageIcon size={20}/> {shotStatus==='loading'?'Загрузка…':shotStatus==='failed'?'Не удалось загрузить снимок':'Снимок не найден'}</div>}{outline&&<p className="evidence-note">Рамка показывает положение элемента; страница могла измениться во время снимка.</p>}<p className="evidence-note">Видимый текст страницы может остаться на PNG.</p><p className="evidence-note">{activeIssue.status==='recommendation'?(activeIssue.kind==='ai-ux'?'Это предположение ИИ — подтвердите его вручную.':'Это гипотеза правила — проверьте её контекст вручную.'):'Запись сформирована автоматическим тестом; при необходимости проверьте контекст вручную.'}</p></div></div></div>}
  </div>;
 }
 
@@ -175,26 +246,37 @@ function ReportSection({report,previous,mapPaths=false,issues,issueFilter,setIss
  const currentIds=new Set(groups?.map(finding=>finding.findingId)||[]);
  const previousIds=new Set(previousGroups?.map(finding=>finding.findingId)||[]);
  const previousOnly=comparison?.comparable?comparison.findings.filter(item=>previousIds.has(item.findingId)&&!item.afterFindingId&&!currentIds.has(item.findingId)):[];
- const evidenceIssue=(finding:NormalizedFinding)=>{
+ type Row={key:string;issue?:Issue;finding?:NormalizedFinding;observation?:NormalizedObservation;state?:string};
+ const rows:Row[]=(()=>{
+  if(!groups) return issues.map(issue=>({key:issue.id,issue}));
+  const list:Row[]=[];
+  const linked=new Set<string>();
+  for(const finding of groups){
    for(const observation of finding.observations){
-     const screenshot=observation.evidence?.screenshot;
-     if(!screenshot) continue;
-     const issue=report.issues.find(item=>item.screenshot===screenshot&&(
-       (observation.source==='axe'&&item.kind==='accessibility'&&`axe:${item.ruleId}`===finding.ruleId)||
-       (observation.source==='playwright'&&item.kind==='functional'&&String(item.step)===observation.stepId)));
-     if(issue) return issue;
+    const issue=findingIssue(report,finding,observation.observationId);
+    if(issue) linked.add(issue.id);
+    list.push({key:observation.observationId,issue,finding,observation,state:states.get(finding.findingId)});
    }
-   return undefined;
+  }
+  for(const issue of report.issues) if(!linked.has(issue.id)) list.push({key:issue.id,issue});
+  return list;
+ })();
+ const visible=rows.filter(row=>issueFilter==='all'||row.issue?.status===issueFilter);
+ const renderRow=(row:Row)=>{
+  const issue=row.issue;
+  const viewport=displayViewportLabel(row.observation?.viewportId||issue?.viewportId,issue?.viewport);
+  const scenario=issue?.scenario||row.observation?.scenarioId||'';
+  const badge=comparisonLabel(row.state);
+  return <button type="button" className="issue-item" key={row.key} disabled={!issue} onClick={()=>{if(issue)onIssue(issue);} }><div className={`issue-marker ${issue?.status==='confirmed'?'hard':'soft'}`}>{issue?.status==='recommendation'?<Sparkles size={16}/>:<AlertCircle size={17}/>}</div><div className="issue-main"><b>{issue?.title||row.finding?.ruleId}</b><p>{issue?.description||''}</p><div>{issue&&<Confidence status={issue.status}/>}<span className="issue-context">{scenario} · {viewport}{badge?` · ${badge}`:''}</span></div></div>{issue&&<Level severity={issue.severity}/>}<ChevronRight size={17} className="issue-arrow"/></button>;
  };
- return <div className={compact?'report compact-report':'report'}><div className="page-head"><div><div className="eyebrow">РЕЗУЛЬТАТ ПРОВЕРКИ · {formatDate(report.startedAt)}</div><h1>{compact?'Отчёт':report.status==='completed'?'Аудит завершён':'Аудит не завершён'}</h1><p>{report.project} · {report.baseUrl}</p></div><div className="report-actions"><button className="btn secondary" onClick={onJson}><FileJson size={16}/> JSON</button><button className="btn primary" onClick={onExport}><FileDown size={16}/> HTML-отчёт</button></div></div>
+ return <div className={compact?'report compact-report':'report'}><div className="page-head"><div><div className="eyebrow">РЕЗУЛЬТАТ ПРОВЕРКИ · {formatDate(report.startedAt)}</div>{compact?null:<h1>{report.status==='completed'?'Аудит завершён':'Аудит не завершён'}</h1>}<p>{report.project} · {report.baseUrl}</p></div><div className="report-actions"><button className="btn secondary" onClick={onJson}><FileJson size={16}/> JSON</button><button className="btn primary" onClick={onExport}><FileDown size={16}/> HTML-отчёт</button></div></div>
+   <section className="panel-card report-card"><div className="panel-title"><div><h2>Найденные проблемы</h2></div><div className="issue-tabs">{[{'id':'all','name':'Все'},{'id':'confirmed','name':'Подтверждённые'},{'id':'recommendation','name':'Рекомендации'}].map(t=><button key={t.id} className={issueFilter===t.id?'active':''} onClick={()=>setIssueFilter(t.id as typeof issueFilter)}>{t.name}</button>)}</div></div>{visible.length?<div className="issue-list">{visible.map(renderRow)}</div>:<div className="no-issues"><CheckCircle2 size={21}/> В этой категории замечаний нет</div>}{previousOnly.length>0&&<div className="report-warnings"><AlertCircle size={17}/><div><b>Нет совпадения с предыдущим прогоном</b>{previousOnly.map(item=>{const finding=previousGroups?.find(group=>group.findingId===item.findingId);const check=previous&&finding?recheckedSteps(previous,report,finding,{mapPaths}):null;const prevIssue=previous&&finding?findingIssue(previous,finding):undefined;return <p key={item.findingId} title={item.findingId}>{prevIssue?.title||finding?.ruleId||'Неизвестное правило'} · {prevIssue?`${prevIssue.scenario} · ${displayViewportLabel(prevIssue.viewportId,prevIssue.viewport)}`:''} · {check?`Повторно пройдено шагов: ${check.passed}/${check.total}. `:''}{item.status==='resolved'?'Ошибка выполнения шага не повторилась на проверенных экранах; общий UX требует отдельной оценки.':'Требуется проверка; исправление не подтверждено.'}</p>})}</div></div>}</section>
    <div className="stats-grid"><div className="stat-card"><span>ПРОЙДЕНО СЦЕНАРИЕВ</span><div className="stat-number">{report.summary.passedRuns}<small> / {report.summary.totalRuns}</small></div><Score passed={report.summary.passedRuns} total={report.summary.totalRuns}/></div><div className="stat-card"><span>ПОДТВЕРЖДЁННЫЕ ДЕФЕКТЫ</span><div className="stat-number">{report.summary.confirmedIssues}</div><div className="stat-footer">По результатам проверок</div></div><div className="stat-card"><span>ЗАМЕЧАНИЯ ДОСТУПНОСТИ</span><div className="stat-number">{report.summary.accessibilityIssues}</div><div className="stat-footer">Автоматический анализ axe</div></div><div className="stat-card"><span>РЕКОМЕНДАЦИИ ИИ</span><div className="stat-number">{report.summary.aiSuggestions}</div><div className="stat-footer">Гипотез правил: {report.summary.ruleSuggestions ?? 0}</div></div></div>
    {previous&&comparison?.comparable&&<div className="regression-bar"><RotateCcw size={17}/><div><b>Повторная проверка · сравнение с предыдущим запуском</b><span>Успешных сценариев: {previous.summary.passedRuns} → {report.summary.passedRuns} · Подтверждённых замечаний: {previous.summary.confirmedIssues} → {report.summary.confirmedIssues}</span></div></div>}
    {previous&&comparison&&!comparison.comparable&&<div className="report-warnings"><AlertCircle size={17}/><div><b>Прогоны несопоставимы</b><p>Настройки, формат или состояние отчётов не позволяют сравнить находки.</p></div></div>}
-   {comparison?.comparable&&<div className="regression-bar"><RotateCcw size={17}/><div><b>{comparison.mappedPaths?'Сопоставление выбранных путей':'Сопоставление наблюдений по ID'}</b><span>Совпали: {comparison.findings.filter(item=>item.status==='still-present').length} · Ошибок шагов не повторилось: {comparison.findings.filter(item=>item.status==='resolved').length} · Требуют проверки: {comparison.findings.filter(item=>item.status==='unverified').length}.</span></div></div>}
-   {groups&&<section className="panel-card report-card"><div className="panel-title"><div><h2>Сгруппированные наблюдения</h2><span>{report.normalizedSchemaVersion==='0.1'?'Частичное покрытие: axe':'Частичное покрытие: axe и ошибки шагов'}</span></div></div>{groups.length?<div className="issue-list">{groups.map(finding=>{const issue=evidenceIssue(finding);return <button type="button" className="issue-item" key={finding.findingId} disabled={!issue} onClick={()=>{if(issue)onIssue(issue);}}><div className="issue-marker hard"><AlertCircle size={17}/></div><div className="issue-main"><b>{finding.ruleId}</b><p title={finding.findingId}>ID {finding.findingId.slice(0,20)}… · Наблюдений: {finding.observations.length}</p><span className="issue-context">{states.get(finding.findingId)==='still-present'?'Есть в предыдущем прогоне':states.get(finding.findingId)==='unverified'?'Нет совпадения — требуется проверка':issue?'Открыть доказательство':'Снимок недоступен'}</span></div>{issue&&<ChevronRight size={17} className="issue-arrow"/>}</button>})}</div>:<div className="no-issues"><CheckCircle2 size={21}/> В доступном покрытии нет сгруппированных наблюдений</div>}{previousOnly.length>0&&<div className="report-warnings"><AlertCircle size={17}/><div><b>Нет совпадения с предыдущим прогоном</b>{previousOnly.map(item=>{const finding=previousGroups?.find(group=>group.findingId===item.findingId);const check=previous&&finding?recheckedSteps(previous,report,finding,{mapPaths}):null;return <p key={item.findingId} title={item.findingId}>{finding?.ruleId || 'Неизвестное правило'} · ID {item.findingId.slice(0,20)}… · {check?`Повторно пройдено шагов: ${check.passed}/${check.total}. `:''}{item.status==='resolved'?'Ошибка выполнения шага не повторилась на проверенных экранах; общий UX требует отдельной оценки.':'Требуется проверка; исправление не подтверждено.'}</p>})}</div></div>}</section>}
-   {!groups&&report.normalizedSchemaVersion&&<div className="report-warnings"><AlertCircle size={17}/><div><b>Сгруппированные наблюдения недоступны</b><p>Формат не поддерживается или данные повреждены; исходные записи ниже сохранены.</p></div></div>}
+   {comparison?.comparable&&<div className="regression-bar"><RotateCcw size={17}/><div><b>{comparison.mappedPaths?'Сопоставление выбранных путей':'Сопоставление наблюдений по ID'}</b><span>Совпали: {comparison.findings.filter(item=>item.status==='still-present').length} · Новые: {comparison.findings.filter(item=>String(item.status)==='new').length} · Ошибок шагов не повторилось: {comparison.findings.filter(item=>item.status==='resolved').length} · Требуют проверки: {comparison.findings.filter(item=>item.status==='unverified').length}.</span></div></div>}
+   {!groups&&report.normalizedSchemaVersion&&<div className="report-warnings"><AlertCircle size={17}/><div><b>Нормализованные наблюдения недоступны</b><p>Формат не поддерживается или данные повреждены; показаны исходные записи.</p></div></div>}
    <section className="panel-card report-card"><div className="panel-title"><div><h2>Прогоны сценариев</h2><span>Каждый сценарий проверен в каждом выбранном разрешении</span></div><span className="subtle-chip"><Clock3 size={14}/>{Math.round(report.durationMs/1000)} сек</span></div><div className="run-list"><div className="run-list-head"><span>Сценарий</span><span>Экран</span><span>Шаги</span><span>Результат</span></div>{report.results.map(r=><details className="run-item" key={r.id}><summary><span className="run-name">{r.status==='passed'?<CheckCircle2 size={18}/>:<XCircle size={18}/>} {r.scenario}</span><span>{r.viewport}</span><span>{r.passedSteps}/{r.totalSteps}</span><span className={`status-pill ${r.status}`}>{r.status==='passed'?'Пройден':'Ошибка'}</span><ChevronDown size={16} className="row-chevron"/></summary><div className="run-steps">{r.steps.map((s,i)=><div className="run-step" key={i}><span className={s.status==='passed'?'step-pass':'step-fail'}>{s.status==='passed'?<Check size={14}/>:<X size={14}/>}</span><b>{s.name}</b><span>{s.durationMs} мс</span>{s.error&&<p>{s.error}</p>}</div>)}{r.trace&&<p className="trace-path">Trace: {r.trace} · файл расположен рядом с HTML-отчётом</p>}</div></details>)}</div></section>
-   <section className="panel-card report-card"><div className="panel-title"><div><h2>Найденные проблемы</h2><span>Нажми на запись, чтобы увидеть доказательство</span></div><div className="issue-tabs">{[{'id':'all','name':'Все'},{'id':'confirmed','name':'Дефекты'},{'id':'recommendation','name':'Гипотезы'}].map(t=><button key={t.id} className={issueFilter===t.id?'active':''} onClick={()=>setIssueFilter(t.id as typeof issueFilter)}>{t.name}</button>)}</div></div>{issues.length?<div className="issue-list">{issues.map(issue=><button className="issue-item" key={issue.id} onClick={()=>onIssue(issue)}><div className={`issue-marker ${issue.status==='confirmed'?'hard':'soft'}`}>{issue.status==='confirmed'?<AlertCircle size={17}/>:<Sparkles size={16}/>}</div><div className="issue-main"><b>{issue.title}</b><p>{issue.description}</p><div><Confidence status={issue.status}/><span className="issue-context">{issue.scenario} · {issue.viewport}</span></div></div><Level severity={issue.severity}/><ChevronRight size={17} className="issue-arrow"/></button>)}</div>:<div className="no-issues"><CheckCircle2 size={21}/> В этой категории замечаний нет</div>}</section>
    {report.warnings.length>0&&<div className="report-warnings"><AlertCircle size={17}/><div><b>Ограничения этого прогона</b>{report.warnings.map((w,i)=><p key={i}>{w}</p>)}</div></div>}
    <div className="report-bottom"><button className="text-button" onClick={onBack}><ArrowLeft size={16}/> Изменить сценарии</button><span>Данные хранятся локально · {report.runId.slice(0,8)}</span></div>
  </div>

@@ -1,4 +1,13 @@
 import fs from 'node:fs/promises';
+import net from 'node:net';
+
+function isLoopbackHost(host) {
+  const name = String(host || '').trim().replace(/^\[|\]$/g, '').toLowerCase();
+  if (name === 'localhost' || name === '::1') return true;
+  const ip = net.isIP(name) === 4 ? name : '';
+  if (ip) return ip.startsWith('127.');
+  return false;
+}
 
 const AI_SYSTEM = `Ты проводишь UI/UX-ревью по скриншоту реального сайта. Пиши по-русски.
 Верни только JSON: {"suggestions":[{"title":"...","description":"...","severity":"low|medium|high"}]}.
@@ -32,7 +41,7 @@ export async function reviewScreenshot({ file, scenario, viewport, findings, pro
   try {
     if (provider === 'ollama') {
       const url = new URL(process.env.UXPROOF_OLLAMA_URL || 'http://127.0.0.1:11434');
-      if (url.username || url.password || !['http:', 'https:'].includes(url.protocol) || !['127.0.0.1', 'localhost', '::1'].includes(url.hostname)) {
+      if (url.username || url.password || !['http:', 'https:'].includes(url.protocol) || !isLoopbackHost(url.hostname)) {
         throw Error('Для MVP Ollama допускается только на localhost');
       }
       const response = await fetch(new URL('/api/chat',url), {

@@ -57,3 +57,17 @@ export function failedStepObservation({ pageUrl, scenario, step, stepIndex, scen
     anchor: [`${url.origin}${url.pathname}`, `scenario:${scenarioId}`, `definition:${scenarioFingerprint}`, `step:${stepIndex + 1}`],
     source: 'playwright', classification: 'technical-fact', status: 'confirmed' };
 }
+
+function pageScopeUrl(pageUrl) {
+  try { return new URL(pageUrl); } catch { return null; }
+}
+
+export function countedObservation({ pageUrl, scenarioId, viewportId, runId, ruleId, source, classification, status, token }) {
+  const url = pageScopeUrl(pageUrl);
+  if (!url || !['http:', 'https:'].includes(url.protocol) || typeof token !== 'string' || !token.trim()) return null;
+  return {
+    observationId: randomUUID(), runId, scenarioId, viewportId, ruleId,
+    anchor: [`${url.origin}${url.pathname}`, token],
+    source, classification, status
+  };
+}
