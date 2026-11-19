@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>UXProof: аудит шагов в Chromium</title>
+<style>
+  @page { size: 13.33in 7.5in; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #d9dde3; color: #202c38; }
+  .slide { width: 13.33in; height: 7.5in; background: #f7f8fa; page-break-after: always; position: relative; padding: 0.55in 0.55in 0.5in 0.7in; overflow: hidden; }
+  .slide::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 0.12in; background: #213e33; }
+  .cover { background: #213e33; color: #fff; padding: 2in 0.7in; }
+  .cover::before { background: #c4f0d2; }
+  .cover .kicker { color: #c4f0d2; font-size: 18pt; margin: 0 0 12px; }
+  .cover h1 { font-size: 32pt; margin: 0 0 28px; line-height: 1.2; }
+  .cover p { color: #c4f0d2; font-size: 16pt; }
+  h2 { font-size: 26pt; margin: 0 0 24px; }
+  .card { background: #fff; border-radius: 8px; padding: 16px 20px; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 8px; color: #213e33; font-size: 18pt; }
+  .card p { margin: 0; font-size: 16pt; }
+  .cols { display: flex; gap: 18px; }
+  .cols > div { flex: 1; background: #fff; border-radius: 8px; padding: 20px; min-height: 4.8in; }
+  .step { flex: 1; background: #fff; border-radius: 8px; padding: 16px; }
+  .num { background: #213e33; color: #c4f0d2; border-radius: 6px; text-align: center; padding: 8px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; background: #fff; font-size: 15pt; }
+  th { background: #213e33; color: #fff; text-align: left; padding: 10px 12px; }
+  td { border: 1px solid #e6e9ed; padding: 10px 12px; }
+  .dots { list-style: none; padding: 0; }
+  .dots li { font-size: 18pt; padding: 10px 0 10px 28px; position: relative; }
+  .dots li::before { content: ""; width: 10px; height: 10px; background: #213e33; border-radius: 50%; position: absolute; left: 0; top: 22px; }
+  pre { font-family: Consolas, monospace; font-size: 16pt; background: #fff; padding: 24px; border-radius: 8px; white-space: pre-wrap; }
+  .note { font-size: 16pt; margin-top: 20px; }
+</style>
+</head>
+<body>
+<section class="slide cover">
+  <p class="kicker">UXProof</p>
+  <h1>Проверяет, проходит ли пользовательский шаг в Chromium</h1>
+  <p>Windows · Tauri 2 · Playwright · axe-core · опциональный ИИ<br>Срез 19 ноября 2026, ветка core-roadmap</p>
+</section>
+<section class="slide">
+  <h2>Что ломается на Relay</h2>
+  <div class="card"><h3>Сохранение</h3><p>Кнопка есть, узла role=status нет. Пользователь не видит, что профиль записан.</p></div>
+  <div class="card"><h3>«На главную»</h3><p>На узком экране ссылка прячется. Шаг click падает по таймауту 5,5 с.</p></div>
+  <div class="card"><h3>Настройки</h3><p>Сценарий ловит JavaScript pageerror и горизонтальный overflow.</p></div>
+</section>
+<section class="slide">
+  <h2>Сценарий × три экрана, два класса находок</h2>
+  <div class="cols">
+    <div><h3 style="color:#213e33">confirmed</h3><p>Упавший шаг Playwright, правило axe, overflow, pageerror. Есть шаг, экран, PNG.</p></div>
+    <div><h3 style="color:#5e6c79">recommendation</h3><p>До трёх гипотез модели по скриншоту. Не доказательство. ИИ выключен по умолчанию.</p></div>
+  </div>
+  <p class="note">Отчёт: JSON, HTML, Excel. План шагов из текста проходит validateConfig и ждёт кнопку.</p>
+</section>
+<section class="slide">
+  <h2>Окно → Rust → Node → Chromium</h2>
+  <div class="cols">
+    <div class="step"><div class="num">1</div><h3>UI</h3><p>React. Сценарии, viewport, запуск.</p></div>
+    <div class="step"><div class="num">2</div><h3>Rust</h3><p>IPC, URL, lock, spawn bundled Node.</p></div>
+    <div class="step"><div class="num">3</div><h3>Runner</h3><p>Playwright, axe, PNG, Excel.</p></div>
+    <div class="step"><div class="num">4</div><h3>Сайт</h3><p>Только http(s). Relay на :4180.</p></div>
+  </div>
+</section>
+<section class="slide">
+  <h2>Relay: два URL, разные итоги</h2>
+  <table>
+    <tr><th>Адрес</th><th>Сценарии × экран</th><th>axe в этом прогоне</th></tr>
+    <tr><td>http://127.0.0.1:4180/</td><td>smoke 5/9</td><td>есть color-contrast</td></tr>
+    <tr><td>http://127.0.0.1:4180/fixed</td><td>test:fix 9/9</td><td>0 замечаний axe</td></tr>
+  </table>
+  <p class="note">qa:ipc в release-окне на /fixed: 9/9 сценариев. В журнале UI могут остаться confirmed находки, которые не ломают шаг (copy-правила). Не обещать «ноль дефектов в интерфейсе».</p>
+</section>
+<section class="slide">
+  <h2>Доказательство шага</h2>
+  <div class="card"><h3>PNG</h3><p>Отдельный снимок упавшего шага. Конечный PNG прогона хранится отдельно.</p></div>
+  <div class="card"><h3>JSON / HTML / Excel</h3><p>Один прогон, три выгрузки. MCP list_reports без картинок.</p></div>
+  <div class="card"><h3>Сравнение</h3><p>resolved только у ошибки шага, если все прежние комбинации прошли.</p></div>
+</section>
+<section class="slide">
+  <h2>Модель предлагает, человек подтверждает</h2>
+  <p class="note">Vision: UXPROOF_OLLAMA_MODEL (дефолт llava). QA: qwen2.5vl:3b. OpenAI gpt-4.1-mini в коде, живой платный вызов не делали.</p>
+  <p class="note">Planner на Ollama читает ту же UXPROOF_OLLAMA_MODEL (дефолт llama3.1). qa:ollama на время плана ставит qwen2.5:3b. UXPROOF_PLANNER_MODEL только для OpenAI.</p>
+  <p class="note">Класс только recommendation. Не больше трёх замечаний. Ollama только localhost. moondream и llama3.2:1b на стенде ломались.</p>
+  <p class="note" style="font-weight:700;color:#213e33">ИИ выключен по умолчанию. Аудит без ключа проходит.</p>
+</section>
+<section class="slide">
+  <h2>Срез 19 ноября 2026</h2>
+  <ul class="dots">
+    <li>128 runner-тестов: 127 pass, 1 skip (Python cryptography).</li>
+    <li>cargo test 19/19, включая Job Object.</li>
+    <li>Ollama живой (qa:ollama). Платный OpenAI нет.</li>
+    <li>MSI на mono: Node в PATH пуст, WebView2 уже стоял.</li>
+    <li>Образ без WebView2 не ставили. GitHub CI глазами не смотрели.</li>
+  </ul>
+</section>
+<section class="slide">
+  <h2>Какой вопрос закрывает инструмент</h2>
+  <table>
+    <tr><th>Инструмент</th><th>Вопрос</th></tr>
+    <tr><td>Playwright Test / Cypress</td><td>Код-тест. Отчёт для разработчика.</td></tr>
+    <tr><td>Lighthouse / axe DevTools</td><td>Страница и WCAG-теги, без сценария сохранения.</td></tr>
+    <tr><td>Percy / Applitools</td><td>Экран изменился. Не факт клика.</td></tr>
+    <tr><td>Скрин в ChatGPT</td><td>Гипотеза. Шаг не исполнен.</td></tr>
+    <tr><td>UXProof</td><td>Сценарий в UI, PNG шага, confirmed отдельно от recommendation.</td></tr>
+  </table>
+</section>
+<section class="slide">
+  <h2>Как открыть</h2>
+  <p class="note">Код: github.com/Narut0-1488/UXProof · ветка core-roadmap. Репозиторий не запускает окно сам.</p>
+  <pre>Windows, два терминала:
+1. npm run demo     →  http://127.0.0.1:4180  и  /fixed
+2. npm run tauri    или  npm run dev (браузер :1420)
+
+Или MSI с машины. GitHub Pages в этот комплект не входит: /fixed без demo/server.mjs даёт 404.</pre>
+</section>
+</body>
+</html>

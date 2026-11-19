@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>UXProof</title>
+<style>
+  @page { size: 13.33in 7.5in; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Calibri, "Segoe UI", sans-serif; background: #111; color: #1a242c; }
+  .slide { width: 13.33in; height: 7.5in; page-break-after: always; overflow: hidden; position: relative; padding: 0.4in 0.45in; }
+  .paper { background: #f4f6f8; }
+  .green { background: #213e33; color: #fff; }
+  h1 { font-size: 32pt; margin: 0 0 18px; line-height: 1.15; }
+  .kicker { color: #d7ede0; font-size: 18pt; margin: 0 0 12px; }
+  .split { display: flex; gap: 20px; height: 5.9in; }
+  .split img { object-fit: contain; background: #fff; max-height: 5.5in; }
+  .cap { font-size: 16pt; margin-top: 8px; }
+  .ok { color: #2c6b4f; } .fail { color: #a33a2c; }
+  .nums { display: flex; gap: 40px; }
+  .nums b { font-size: 80pt; display: block; line-height: 1; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 28px 40px; }
+  .grid2 b { font-size: 52pt; display: block; }
+  .row { background: #fff; padding: 18px 22px; margin-bottom: 12px; font-size: 18pt; }
+  .row.me { background: #213e33; color: #d7ede0; }
+  .qr { width: 2.6in; background: #fff; padding: 8px; }
+</style>
+</head>
+<body>
+<section class="slide green" style="display:flex;gap:24px;align-items:center;">
+  <div style="flex:1;padding-left:12px">
+    <p class="kicker">UXProof</p>
+    <h1>Проверяет реальные действия пользователя и показывает, где интерфейс ломается</h1>
+  </div>
+  <img src="assets/crop-editor.png" alt="Редактор UXProof" style="width:5.7in;height:6.4in;object-fit:cover;">
+</section>
+<section class="slide paper">
+  <h1>На узком экране пропадает «На главную»</h1>
+  <div class="split">
+    <div><img src="assets/crop-settings-desktop.png" alt="Desktop" style="width:7.4in;"><p class="cap ok">Широкий экран: кнопка есть</p></div>
+    <div><img src="assets/crop-settings-mobile.png" alt="Mobile" style="width:4.5in;"><p class="cap fail">390 px: кнопки нет, шаг падает за 5,5 с</p></div>
+  </div>
+</section>
+<section class="slide paper">
+  <h1>Сайт, сценарий, отчёт. Без написания теста</h1>
+  <div class="split">
+    <img src="assets/crop-editor.png" alt="Редактор" style="width:6.4in;">
+    <div>
+      <p><b>1. Адрес</b><br>http://127.0.0.1:4180</p>
+      <p><b>2. Сценарии в редакторе</b><br>Выбор сервера, сохранение, возврат.</p>
+      <p><b>3. Результат в том же окне</b><br>Какой шаг сорвался, PNG доказательства.</p>
+    </div>
+  </div>
+</section>
+<section class="slide paper">
+  <h1>Один сценарий сохранения. Три ширины. Три отказа</h1>
+  <div class="split">
+    <div><img src="assets/live-settings-desktop.png" alt="1440" style="width:4in;height:4.3in;object-fit:contain;"><p>Desktop 1440</p><p class="cap fail">Нет status после «Сохранить»</p></div>
+    <div><img src="assets/live-settings-tablet.png" alt="768" style="width:4in;height:4.3in;object-fit:contain;"><p>Tablet 768</p><p class="cap fail">Тот же шаг, тот же таймаут</p></div>
+    <div><img src="assets/live-settings-mobile.png" alt="390" style="width:4in;height:4.3in;object-fit:contain;"><p>Mobile 390</p><p class="cap fail">Плюс скрытая «На главную»</p></div>
+  </div>
+</section>
+<section class="slide paper">
+  <h1>После правок Relay: 5/9 → 9/9 комбинаций</h1>
+  <div class="nums">
+    <div><b class="fail">5/9</b><span>сценарий × экран, исходный Relay</span></div>
+    <div><b class="ok">9/9</b><span>сценарий × экран, вариант /fixed</span></div>
+  </div>
+  <div class="split" style="height:4.4in;margin-top:12px;">
+    <img src="assets/crop-settings-mobile.png" alt="до" style="height:4.3in;object-fit:contain;">
+    <img src="assets/crop-fixed-mobile.png" alt="после" style="height:4.3in;object-fit:contain;">
+  </div>
+</section>
+<section class="slide paper">
+  <h1>Шаг 4: нет подтверждения сохранения</h1>
+  <img src="assets/crop-modal.png" alt="Карточка дефекта" style="display:block;margin:0 auto;height:5.6in;object-fit:contain;">
+  <p class="cap">confirmed · Сохранение настроек · компьютер · 5,5 с без role=status</p>
+</section>
+<section class="slide paper">
+  <h1>Измерение отдельно, гипотеза модели отдельно</h1>
+  <div class="split">
+    <div><img src="assets/crop-results.png" alt="confirmed" style="width:6.2in;height:5.3in;object-fit:cover;"><p class="cap fail">22 confirmed, 4 axe</p></div>
+    <div><img src="assets/crop-recommendations.png" alt="ИИ" style="width:6.2in;height:5.3in;object-fit:cover;"><p class="cap">Рекомендации ИИ: 0. Переключатель был выключен</p></div>
+  </div>
+</section>
+<section class="slide green">
+  <p class="kicker">Проверено 19 ноября 2026</p>
+  <div class="grid2">
+    <div><b>127</b>runner-тестов прошли<br><span style="color:#d7ede0">ещё 1 skip без Python cryptography</span></div>
+    <div><b>19/19</b>тестов Rust<br><span style="color:#d7ede0">включая снятие sidecar с окном</span></div>
+    <div><b>9/9</b>сценариев в release-окне<br><span style="color:#d7ede0">qa:ipc, WebView2 CDP</span></div>
+    <div><b>MSI</b>свой Node и Chromium<br><span style="color:#d7ede0">установка на Windows 10, WebView2 уже был</span></div>
+  </div>
+  <p style="position:absolute;bottom:0.4in;color:#d7ede0;">Платный OpenAI не вызывали. Образ без WebView2 не ставили.</p>
+</section>
+<section class="slide paper">
+  <h1>Сценарий в окне, прогон в браузере, два класса находок</h1>
+  <div class="row"><b>Playwright / Cypress</b> — пишете тест кодом. Отчёт для разработчика.</div>
+  <div class="row"><b>Lighthouse / axe</b> — страница и WCAG-теги. Сценарий «сохранить → status» сами не проходят.</div>
+  <div class="row"><b>Percy / Applitools</b> — картинка изменилась. Клик мог и не дойти.</div>
+  <div class="row me"><b>UXProof</b> — сценарий в UI → Chromium → PNG шага. confirmed отдельно от recommendation.</div>
+</section>
+<section class="slide green" style="display:flex;gap:32px;align-items:center;">
+  <div style="flex:1;">
+    <p class="kicker">UXProof</p>
+    <h1>Девять комбинаций. Пять падают. После правки проходят все девять.</h1>
+    <p>Исходники: github.com/Narut0-1488/UXProof<br>Живое окно только на Windows, не веб-сервис.</p>
+  </div>
+  <div>
+    <img class="qr" src="assets/qr-github.png" alt="QR GitHub">
+    <p style="color:#d7ede0;font-size:14pt;">Репозиторий, не онлайн-демо</p>
+  </div>
+</section>
+</body>
+</html>

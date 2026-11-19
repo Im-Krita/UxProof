@@ -1,0 +1,12 @@
+import { chromium } from '../runner/node_modules/playwright/index.mjs';
+const browser = await chromium.connectOverCDP(process.env.UXPROOF_CDP || 'http://127.0.0.1:9333');
+const page = browser.contexts().flatMap(c => c.pages()).find(p => p.url().includes('tauri.localhost'));
+await page.getByRole('button', { name: /История проверок/ }).click();
+await page.waitForTimeout(1000);
+const body = await page.locator('body').innerText();
+console.log(body.split('\n').filter(Boolean).slice(0, 25).join(' | '));
+const empty = /пока нет|пуста|нет провер|запусти первый|история пуст/i.test(body) || !/\d{1,2} нояб/.test(body);
+console.log(empty ? 'OK   история пуста после удаления runs' : 'FAIL история не пуста');
+await page.screenshot({ path: '.uxproof-data/mono-empty-history.png' });
+await browser.close();
+process.exitCode = empty ? 0 : 1;

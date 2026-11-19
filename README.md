@@ -127,6 +127,8 @@ CI — `.github/workflows/ci.yml`: обязательная job (runner-тест
 
 Дополнительные критерии приёмки — `docs/TEST_PLAN.md`. Срез готовности — `docs/FEATURE-MATRIX.md`. `docs/VALIDATION.md` — архив от 15 ноября, не текущий статус.
 
+Подача (описание, слайды, демо, ИИ, конкуренты; без видео и без `report.json`): `docs/submission/`.
+
 ## MCP и локальный API
 
 Dev API (`npm run dev:api`) слушает только `127.0.0.1`. При заданном `UXPROOF_DEV_TOKEN` запросы к `run`, `cancel`, `history`, `plan` требуют этого токена в заголовке `X-UXProof-Token` (или `Authorization: Bearer`); заголовок `X-UXProof-Client` остаётся дополнительной проверкой, но не заменяет токен.
