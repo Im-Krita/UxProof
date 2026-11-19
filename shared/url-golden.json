@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "0.1",
+  "note": "One table for the three URL surfaces. `accept` is the expected decision per surface: ui = shared/policy-core.mjs used by src/lib/config-check.ts, node = runner/validators.mjs, rust = src-tauri validate(). A surface must not disagree with its own column; disagreements between columns are listed in the plan and are not silently allowed.",
+  "baseUrl": [
+    { "id": "loopback", "url": "http://127.0.0.1:4180/", "ui": "accept", "node": "accept", "rust": "accept" },
+    { "id": "public-https", "url": "https://example.com/app", "ui": "accept", "node": "accept", "rust": "accept" },
+    { "id": "localhost-name", "url": "http://localhost:3000/", "ui": "accept", "node": "accept", "rust": "accept" },
+    { "id": "private-lan", "url": "http://10.0.0.5/", "ui": "accept", "node": "accept", "rust": "accept" },
+    { "id": "file-scheme", "url": "file:///C:/Windows/win.ini", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "javascript-scheme", "url": "javascript:alert(1)", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "ftp-scheme", "url": "ftp://example.com/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "credentials", "url": "http://user:secret@127.0.0.1:4180", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "metadata-ip", "url": "http://169.254.169.254/latest/meta-data", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "metadata-mapped", "url": "http://[::ffff:169.254.169.254]/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "metadata-nat64", "url": "http://[64:ff9b::a9fe:a9fe]/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "metadata-name", "url": "http://metadata.google.internal/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "unspecified-v4", "url": "http://0.0.0.0/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "unspecified-v6", "url": "http://[::]/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "link-local-v6", "url": "http://[fe80::1]/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "multicast", "url": "http://239.1.1.1/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "empty", "url": "", "ui": "reject", "node": "reject", "rust": "reject" }
+  ],
+  "navigate": [
+    { "id": "same-origin-path", "value": "/settings", "ui": "accept", "node": "accept", "rust": "accept" },
+    { "id": "same-origin-relative", "value": "settings", "ui": "accept", "node": "accept", "rust": "accept" },
+    { "id": "same-origin-absolute", "value": "http://127.0.0.1:4180/settings", "ui": "accept", "node": "accept", "rust": "accept" },
+    { "id": "cross-origin", "value": "https://example.com", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "cross-origin-same-host-other-port", "value": "http://127.0.0.1:9999/", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "javascript-value", "value": "javascript:alert(1)", "ui": "reject", "node": "reject", "rust": "reject" },
+    { "id": "protocol-relative", "value": "//example.com/app", "ui": "reject", "node": "reject", "rust": "reject" }
+  ]
+}

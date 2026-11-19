@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:runner": "node --test runner/tests/*.test.mjs",
+    "test:runner": "node scripts/test-runner.mjs",
     "test:portable": "node scripts/test-portable.mjs",
     "test:edge": "node scripts/edge-cases.mjs",
     "test:fix": "node scripts/verify-fix.mjs",

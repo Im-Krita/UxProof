@@ -1,0 +1,12 @@
+export function normalizeHost(hostname:string):string;
+export function isIpLiteral(host:string):boolean;
+export function isLoopbackHost(host:string):boolean;
+export function isLinkLocalHost(host:string):boolean;
+export function isMetadataHost(host:string):boolean;
+export function isUnspecifiedHost(host:string):boolean;
+export function isMulticastHost(host:string):boolean;
+export function isPrivateHost(host:string):boolean;
+export function assertBaseUrlShape(baseUrl:unknown):URL;
+export function baseUrlError(baseUrl:string):string;
+export function decideRequest(targetUrl:string, baseUrl:string, baseLoopback:boolean):{allow:boolean;reason?:string;needsDns?:boolean};
+export function navigateDecision(baseUrl:string, value:unknown):{allow:boolean;reason?:string};

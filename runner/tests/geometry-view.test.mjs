@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { screenshotOutline } from '../geometry-view.mjs';
+import { screenshotOutline } from '../../shared/geometry-view.mjs';
 
 test('draws only unique screenshot-linked geometry and clips to viewport', () => {
   const geometry = { x: -10, y: 25, width: 30, height: 100, viewportWidth: 100, viewportHeight: 100, deviceScaleFactor: 2, scrollX: 0, scrollY: 10 };

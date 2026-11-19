@@ -19,4 +19,4 @@ export function comparisonProfileKey(config) {
   return `comparison-profile-v1-${createHash('sha256').update(JSON.stringify(canonical(input))).digest('hex')}`;
 }
 
-export { compareFindings } from './matching.mjs';
+export { compareFindings } from '../shared/matching.mjs';

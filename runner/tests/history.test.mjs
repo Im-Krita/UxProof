@@ -57,9 +57,10 @@ test('history API skips invalid and truncated files while retaining legacy recor
     });
     const response = await fetch(`${address}/api/history`);
     assert.equal(response.status, 200);
-    const reports = await response.json();
-    assert.equal(reports.length, 1);
-    assert.equal(reports[0].runId, 'legacy');
+    const page = await response.json();
+    assert.equal(page.reports.length, 1);
+    assert.equal(page.reports[0].runId, 'legacy');
+    assert.equal(page.skipped, 2);
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       const exited = once(child, 'exit').catch(() => {});

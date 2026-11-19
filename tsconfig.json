@@ -4,8 +4,11 @@
     "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
     "strict": true, "skipLibCheck": true, "isolatedModules": true, "resolveJsonModule": true,
     "baseUrl": ".",
-    "paths": { "@uxproof/audit-config-limits.json": ["./runner/schemas/audit-config-limits.json"] },
+    "paths": {
+      "@uxproof/audit-config-limits.json": ["./runner/schemas/audit-config-limits.json"],
+      "@uxproof/rule-registry.json": ["./runner/rules/registry-v0.1.json"]
+    },
     "allowImportingTsExtensions": true, "noEmit": true, "types": ["vite/client"]
   },
-  "include": ["src", "runner/schemas/audit-config-limits.json"]
+  "include": ["src", "shared", "runner/schemas/audit-config-limits.json", "runner/rules/registry-v0.1.json"]
 }

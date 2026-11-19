@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { validateDomSummary } from './dom-summary.mjs';
 import { validateElementGeometry } from './element-geometry.mjs';
-import { pageScope } from './matching.mjs';
+import { pageScope } from '../shared/matching.mjs';
 import { scopeIdentifier } from './findings.mjs';
 
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;

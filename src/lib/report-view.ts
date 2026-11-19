@@ -1,2 +1,2 @@
-export { compareFindings, displayViewportLabel, findingIssue, presentableFindings, recheckedSteps } from '../../runner/matching.mjs';
-export { screenshotOutline } from '../../runner/geometry-view.mjs';
+export { compareFindings, displayViewportLabel, findingIssue, presentableFindings, recheckedSteps } from '../../shared/matching.mjs';
+export { screenshotOutline } from '../../shared/geometry-view.mjs';

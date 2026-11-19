@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { compareFindings, comparisonKey, comparisonProfileKey } from '../comparison.mjs';
-import { presentableFindings, recheckedSteps } from '../matching.mjs';
+import { presentableFindings, recheckedSteps } from '../../shared/matching.mjs';
 
 test('does not claim resolution when coverage is partial', () => {
   const before = { comparisonKey: 'same', normalizedSchemaVersion: '0.2', status: 'completed', normalizedCoverage: { status: 'partial' }, normalizedFindings: [{ findingId: 'a' }, { findingId: 'b' }] };

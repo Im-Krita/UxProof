@@ -54,10 +54,14 @@ export function cancelAudit() {
   return responseJson<{ok:boolean}>('/api/cancel',{method:'POST',headers:{'X-UXProof-Client':'1'}});
 }
 
-export async function listReports():Promise<AuditReport[]> {
-  const records:unknown = await (tauriAvailable() ? invokeTauri<unknown>('list_reports') : responseJson<unknown>('/api/history'));
+export interface HistoryPage { reports: AuditReport[]; skipped: number }
+
+export async function listReports():Promise<HistoryPage> {
+  const payload:unknown = await (tauriAvailable() ? invokeTauri<unknown>('list_reports') : responseJson<unknown>('/api/history'));
+  const records = Array.isArray(payload) ? payload : (payload as {reports?:unknown})?.reports;
   if (!Array.isArray(records)) throw new Error('Некорректный ответ истории');
-  return records.filter(isHistoryReport);
+  const skipped = Array.isArray(payload) ? 0 : Number((payload as {skipped?:unknown}).skipped) || 0;
+  return { reports: records.filter(isHistoryReport), skipped };
 }
 
 export async function screenshotUrl(runId:string,filename:string):Promise<string> {
@@ -70,6 +74,16 @@ export async function exportHtml(runId:string):Promise<string> {
   const url=`/api/export?runId=${encodeURIComponent(runId)}`;
   const a=document.createElement('a');a.href=url;a.download='uxproof-report.html';document.body.append(a);a.click();a.remove();
   return 'HTML-отчёт скачивается браузером';
+}
+
+// Trace lives next to the report; opening it uses the same whitelist as screenshots.
+export async function exportTrace(runId:string,relativePath:string):Promise<string> {
+  const filename=relativePath.split('/').pop()||'';
+  if(!/^trace-\d+-\d+\.zip$/.test(filename)) throw new Error('Недопустимое имя trace-файла');
+  if(tauriAvailable()) return invokeTauri<string>('export_trace',{runId,filename});
+  const url=`/api/trace?runId=${encodeURIComponent(runId)}&file=${encodeURIComponent(filename)}`;
+  const a=document.createElement('a');a.href=url;a.download='uxproof-trace.zip';document.body.append(a);a.click();a.remove();
+  return 'Trace скачивается браузером';
 }
 
 export function downloadJson(name:string,data:unknown) {

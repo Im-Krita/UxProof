@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use serde::Deserialize;
 use std::{
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{Read, Write},
     net::Ipv4Addr,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -40,7 +40,7 @@ static AUDIT_LOCK: AuditLock = AuditLock::new();
 static CHILD_PID: Mutex<Option<u32>> = Mutex::new(None);
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ConfigLimits {
     min_scenarios: usize,
     max_scenarios: usize,
@@ -101,18 +101,33 @@ impl Drop for FileLock {
 
 fn lock_audit_file(root: &Path) -> Result<FileLock, String> {
     let path = root.join(".audit.lock");
-    let mut file = OpenOptions::new().read(true).write(true).create(true).open(&path)
-        .map_err(|e| format!("Не удалось открыть блокировку проверки: {e}"))?;
+    // Mirrors runner/audit-lock.mjs: create exclusively first; only an existing
+    // lock is inspected. An empty lock stays busy until it is 20 minutes old,
+    // a live pid is never stolen, a dead pid is reclaimed immediately.
+    let mut file = match OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let mut existing = OpenOptions::new().read(true).write(true).open(&path)
+                .map_err(|e| format!("Не удалось открыть блокировку проверки: {e}"))?;
+            let mut owner_text = String::new();
+            existing.read_to_string(&mut owner_text).map_err(|e| format!("Не удалось прочитать блокировку проверки: {e}"))?;
+            let owner: u32 = owner_text.trim().parse().unwrap_or(0);
+            let reclaimable = if owner == 0 {
+                let age = fs::metadata(&path).ok().and_then(|meta| meta.modified().ok()).and_then(|time| time.elapsed().ok());
+                matches!(age, Some(age) if age.as_millis() > 20 * 60 * 1000)
+            } else {
+                owner != std::process::id() && !process_alive(owner)
+            };
+            if !reclaimable {
+                return Err("Уже выполняется другая проверка. Дождитесь её завершения.".into());
+            }
+            fs::remove_file(&path).map_err(|e| format!("Не удалось снять устаревшую блокировку: {e}"))?;
+            OpenOptions::new().read(true).write(true).create_new(true).open(&path)
+                .map_err(|e| format!("Не удалось создать блокировку проверки: {e}"))?
+        }
+        Err(error) => return Err(format!("Не удалось создать блокировку проверки: {error}")),
+    };
     file.try_lock().map_err(|e| format!("Не удалось получить блокировку проверки: {e}"))?;
-    file.seek(SeekFrom::Start(0)).map_err(|e| format!("Не удалось прочитать блокировку проверки: {e}"))?;
-    let mut existing = String::new();
-    file.read_to_string(&mut existing).map_err(|e| format!("Не удалось прочитать блокировку проверки: {e}"))?;
-    let owner: u32 = existing.trim().parse().unwrap_or(0);
-    if owner != 0 && owner != std::process::id() && process_alive(owner) {
-        return Err("Уже выполняется другая проверка. Дождитесь её завершения.".into());
-    }
-    file.set_len(0).map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
-    file.seek(SeekFrom::Start(0)).map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
     write!(&file, "{}", std::process::id()).map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
     file.flush().map_err(|e| format!("Не удалось записать блокировку проверки: {e}"))?;
     Ok(FileLock { file: Some(file), path })
@@ -130,7 +145,14 @@ fn kill_pid(pid: u32) {
 }
 
 fn report_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let root = app.path().app_data_dir().map_err(|e| e.to_string())?.join("runs");
+    // One runs directory (and one lock) for the desktop app, the CLI and the dev
+    // API. UXPROOF_RUNS_DIR wins so all three can be pointed at the same place;
+    // a debug build otherwise uses the repository directory used by the CLI.
+    let root = match std::env::var("UXPROOF_RUNS_DIR") {
+        Ok(value) if !value.trim().is_empty() => PathBuf::from(value),
+        _ if cfg!(debug_assertions) => Path::new(env!("CARGO_MANIFEST_DIR")).join("../.uxproof-data/runs"),
+        _ => app.path().app_data_dir().map_err(|e| e.to_string())?.join("runs"),
+    };
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     Ok(root)
 }
@@ -330,10 +352,14 @@ fn select_runtime(resource_dir: &Path, allow_dev: bool) -> Result<(PathBuf, Opti
     Ok((node, Some(browsers)))
 }
 
-fn run_node(script: &Path, input: &[u8], node: &Path, browsers: Option<&Path>) -> Result<Vec<u8>, String> {
+fn run_node(script: &Path, input: &[u8], node: &Path, browsers: Option<&Path>, runs_dir: Option<&Path>) -> Result<Vec<u8>, String> {
     let mut command = Command::new(node);
     if let Some(browser_dir) = browsers {
         command.env("PLAYWRIGHT_BROWSERS_PATH", browser_dir).env_remove("NODE_OPTIONS");
+    }
+    // The CLI acquires its lock in the same directory as this process.
+    if let Some(dir) = runs_dir {
+        command.env("UXPROOF_RUNS_DIR", dir);
     }
     let mut child = command.arg(script)
         .arg("-")
@@ -437,7 +463,7 @@ async fn run_audit(app: tauri::AppHandle, config: Value) -> Result<Value, String
         payload["runId"] = json!(id);
         payload["outputDir"] = json!(dir.to_string_lossy().to_string());
         let input = serde_json::to_vec(&payload).map_err(|e| e.to_string())?;
-        let stdout = run_node(&script, &input, &node, browsers.as_deref())?;
+        let stdout = run_node(&script, &input, &node, browsers.as_deref(), Some(&root))?;
         serde_json::from_slice(&stdout).map_err(|e| format!("Некорректный ответ runner: {e}"))
     })
     .await
@@ -455,22 +481,22 @@ fn cancel_audit() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn list_reports(app: tauri::AppHandle) -> Result<Vec<Value>, String> {
+fn list_reports(app: tauri::AppHandle) -> Result<Value, String> {
     let mut reports = Vec::new();
+    let mut skipped = 0usize;
     for entry in fs::read_dir(report_root(&app)?).map_err(|e| e.to_string())? {
         let path = entry.map_err(|e| e.to_string())?.path().join("report.json");
         if !path.is_file() {
             continue;
         }
-        if let Ok(bytes) = fs::read(&path) {
-            if let Ok(report) = serde_json::from_slice::<Value>(&bytes) {
-                reports.push(report);
-            }
+        match fs::read(&path).ok().and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()) {
+            Some(report) => reports.push(report),
+            None => skipped += 1,
         }
     }
     reports.sort_by(|a, b| b.get("startedAt").and_then(Value::as_str).cmp(&a.get("startedAt").and_then(Value::as_str)));
     reports.truncate(30);
-    Ok(reports)
+    Ok(json!({ "reports": reports, "skipped": skipped }))
 }
 
 #[tauri::command]
@@ -486,6 +512,21 @@ fn read_screenshot(app: tauri::AppHandle, run_id: String, filename: String) -> R
         return Err("Скриншот слишком большой".into());
     }
     Ok(format!("data:image/png;base64,{}", STANDARD.encode(bytes)))
+}
+
+#[tauri::command]
+fn export_trace(app: tauri::AppHandle, run_id: String, filename: String) -> Result<String, String> {
+    if !valid_token(&run_id) || !valid_token(&filename) || !filename.ends_with(".zip") {
+        return Err("Недопустимое имя файла".into());
+    }
+    let root = report_root(&app)?;
+    let path = root.join(&run_id).join("traces").join(&filename);
+    if !path.is_file() {
+        return Err("Trace-файл отсутствует".into());
+    }
+    inside(&root, &path)?;
+    reveal(&path)?;
+    Ok(path.display().to_string())
 }
 
 #[tauri::command]
@@ -505,7 +546,7 @@ fn export_html(app: tauri::AppHandle, run_id: String) -> Result<String, String> 
 
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![run_audit, cancel_audit, list_reports, read_screenshot, export_html])
+        .invoke_handler(tauri::generate_handler![run_audit, cancel_audit, list_reports, read_screenshot, export_html, export_trace])
         .run(tauri::generate_context!())
         .expect("error running UXProof");
 }
@@ -536,6 +577,32 @@ mod tests {
         assert_eq!(limits.max_steps, 30);
         assert_eq!(limits.max_viewports, 4);
         assert!(cancel_audit().is_err());
+    }
+
+    // Golden check: the struct must consume every key of the schema file, so a new
+    // limit cannot be added to JSON while the Rust boundary keeps its old default.
+    #[test]
+    fn config_limits_match_the_schema_file() {
+        let raw: Value = serde_json::from_str(include_str!("../../runner/schemas/audit-config-limits.json")).unwrap();
+        let limits = config_limits();
+        let object = raw.as_object().expect("limits object");
+        assert_eq!(object.len(), 16, "schema gained or lost a key; update ConfigLimits and this test");
+        assert_eq!(limits.min_scenarios, object["minScenarios"].as_u64().unwrap() as usize);
+        assert_eq!(limits.max_scenarios, object["maxScenarios"].as_u64().unwrap() as usize);
+        assert_eq!(limits.min_steps, object["minSteps"].as_u64().unwrap() as usize);
+        assert_eq!(limits.max_steps, object["maxSteps"].as_u64().unwrap() as usize);
+        assert_eq!(limits.min_viewports, object["minViewports"].as_u64().unwrap() as usize);
+        assert_eq!(limits.max_viewports, object["maxViewports"].as_u64().unwrap() as usize);
+        assert_eq!(limits.min_width, object["minWidth"].as_u64().unwrap());
+        assert_eq!(limits.max_width, object["maxWidth"].as_u64().unwrap());
+        assert_eq!(limits.min_height, object["minHeight"].as_u64().unwrap());
+        assert_eq!(limits.max_height, object["maxHeight"].as_u64().unwrap());
+        assert_eq!(limits.max_project_len, object["maxProjectLen"].as_u64().unwrap() as usize);
+        assert_eq!(limits.max_scenario_title, object["maxScenarioTitle"].as_u64().unwrap() as usize);
+        assert_eq!(limits.max_step_name, object["maxStepName"].as_u64().unwrap() as usize);
+        assert_eq!(limits.max_target, object["maxTarget"].as_u64().unwrap() as usize);
+        assert_eq!(limits.max_value, object["maxValue"].as_u64().unwrap() as usize);
+        assert_eq!(limits.step_types.len(), object["stepTypes"].as_array().unwrap().len());
     }
 
     #[test]
@@ -655,7 +722,7 @@ mod tests {
         let previous = std::env::var("UXPROOF_MAX_MS").ok();
         std::env::set_var("UXPROOF_MAX_MS", "1");
         let started = Instant::now();
-        let error = run_node(&script, b"{}", Path::new("node"), None).unwrap_err();
+        let error = run_node(&script, b"{}", Path::new("node"), None, None).unwrap_err();
         if let Some(value) = previous { std::env::set_var("UXPROOF_MAX_MS", value); } else { std::env::remove_var("UXPROOF_MAX_MS"); }
         assert!(error.contains("лимит времени"), "{error}");
         assert!(started.elapsed() < Duration::from_secs(45), "hung node was not joined in time");
@@ -669,7 +736,7 @@ mod tests {
         fs::create_dir(&dir).unwrap();
         let script = dir.join("runner.mjs");
         fs::write(&script, "let s=''; for await (const c of process.stdin) s += c; process.stdout.write(JSON.parse(s).probe);").unwrap();
-        let output = run_node(&script, br#"{"probe":"received"}"#, Path::new("node"), None).unwrap();
+        let output = run_node(&script, br#"{"probe":"received"}"#, Path::new("node"), None, None).unwrap();
         assert_eq!(output, b"received");
         fs::remove_file(script).unwrap();
         fs::remove_dir(dir).unwrap();

@@ -29,7 +29,11 @@ function canReclaim(owner) {
   return owner.mtimeMs > 0 && Date.now() - owner.mtimeMs > STALE_MS;
 }
 
+// One runs root for the CLI, the dev API and a debug Tauri build. A packaged
+// build resolves the same environment variable, so all three share one lock.
 export function defaultRunsDir() {
+  const configured = process.env.UXPROOF_RUNS_DIR;
+  if (typeof configured === 'string' && configured.trim()) return path.resolve(configured);
   return path.resolve('.uxproof-data/runs');
 }
 

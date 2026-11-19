@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { pageScope } from './matching.mjs';
+import { pageScope } from '../shared/matching.mjs';
 
 export function scopeIdentifier(value) {
   const scope = pageScope(value);

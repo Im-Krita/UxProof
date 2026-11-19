@@ -28,7 +28,13 @@ test('bundle does not include the entire runner directory or local environment f
     assert.equal(resources[`../runner/${name}`], `runner/${name}`, `missing runner module ${name}`);
     const text = await fs.readFile(new URL(`../${name}`, import.meta.url), 'utf8');
     for (const match of text.matchAll(/\bfrom\s+['"]\.\/([^'"]+\.mjs)['"]/g)) pending.push(match[1]);
+    for (const match of text.matchAll(/\bfrom\s+['"]\.\.\/shared\/([^'"]+\.mjs)['"]/g)) {
+      assert.equal(resources[`../shared/${match[1]}`], `shared/${match[1]}`, `missing shared module ${match[1]}`);
+    }
   }
+  assert.equal(resources['../shared/matching.mjs'], 'shared/matching.mjs');
+  assert.equal(resources['../shared/geometry-view.mjs'], 'shared/geometry-view.mjs');
+  assert.ok(!Object.keys(resources).some(source => /^\.\.\/runner\/(matching|geometry-view)\.mjs$/.test(source)));
 });
 
 test('explicit bundle resources run a real audit outside the checkout', { timeout: 60000 }, async () => {

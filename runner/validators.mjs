@@ -1,6 +1,7 @@
-import { assertBaseUrlShape, decideRequest } from './policy.mjs';
-import { validateDisabledRules } from './rules.mjs';
+import { decideRequest } from './policy.mjs';
+import { ruleIds } from './rules.mjs';
 import { LIMITS } from './limits.mjs';
+import { configError } from '../shared/config-check.mjs';
 
 export const STEP_TYPES = new Set(LIMITS.stepTypes);
 
@@ -11,40 +12,11 @@ export class InputError extends Error {
   }
 }
 
-const fail = message => { throw new InputError(message); };
-
 export function validateConfig(config) {
-  if (!config || typeof config !== 'object') fail('Не задана конфигурация');
-  try { validateDisabledRules(config.options?.disabledRules); } catch { fail('Некорректный список отключённых правил'); }
-  if (config.options?.trace !== undefined && !['off', 'on-failure'].includes(config.options.trace)) fail('Некорректный режим trace');
-  const parsed = (() => { try { return assertBaseUrlShape(config.baseUrl); } catch (error) { fail(error.message); } })();
-  if (typeof config.project === 'string' && config.project.length > LIMITS.maxProjectLen) fail('Слишком длинное название проекта');
-  if (!Array.isArray(config.scenarios) || config.scenarios.length < LIMITS.minScenarios || config.scenarios.length > LIMITS.maxScenarios) fail('Нужно от 1 до 10 сценариев');
-  if (!Array.isArray(config.viewports) || config.viewports.length < LIMITS.minViewports || config.viewports.length > LIMITS.maxViewports) fail('Нужно от 1 до 4 разрешений экрана');
-  for (const vp of config.viewports) {
-    if (!Number.isInteger(vp.width) || !Number.isInteger(vp.height) || vp.width < LIMITS.minWidth || vp.width > LIMITS.maxWidth || vp.height < LIMITS.minHeight || vp.height > LIMITS.maxHeight) fail('Недопустимые размеры экрана');
-  }
-  for (const scenario of config.scenarios) {
-    if (typeof scenario.title !== 'string' || scenario.title.length > LIMITS.maxScenarioTitle || !Array.isArray(scenario.steps) || scenario.steps.length < LIMITS.minSteps || scenario.steps.length > LIMITS.maxSteps) fail('Некорректный сценарий');
-    for (const step of scenario.steps) {
-      if (!STEP_TYPES.has(step.type)) fail(`Неизвестный шаг: ${step.type}`);
-      if (typeof step.name === 'string' && step.name.length > LIMITS.maxStepName) fail('Слишком длинное название шага');
-      if (typeof step.target === 'string' && step.target.length > LIMITS.maxTarget) fail('Слишком длинный селектор');
-      if (typeof step.value === 'string' && step.value.length > LIMITS.maxValue) fail('Слишком длинное значение шага');
-      if (step.type !== 'wait' && step.type !== 'navigate' && !String(step.target || '').trim()) fail('У шага отсутствует селектор');
-      if (['expectText', 'expectValue', 'select'].includes(step.type) && !String(step.value ?? '').trim()) fail('У шага отсутствует ожидаемое значение');
-      if (step.type === 'navigate' && step.value) {
-        const raw = String(step.value).trim();
-        if (/^[a-z][a-z0-9+.-]*:/i.test(raw) && !/^https?:/i.test(raw)) fail('Переход разрешён только по http(s)');
-        if (raw.includes('://') || raw.startsWith('//')) {
-          let target;
-          try { target = new URL(raw, parsed); } catch { fail('Некорректный адрес перехода'); }
-          if (target.origin !== parsed.origin) fail('Переход за пределы адреса проекта запрещён');
-          const decision = decideRequest(target.href, parsed.href, false);
-          if (!decision.allow) fail(decision.reason || 'Переход запрещён');
-        }
-      }
-    }
+  try {
+    configError(config, LIMITS, ruleIds);
+  } catch (error) {
+    throw new InputError(String(error?.message || error));
   }
   return config;
 }

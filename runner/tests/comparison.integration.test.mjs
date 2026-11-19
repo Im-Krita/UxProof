@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
 import { runAudit } from '../audit.mjs';
-import { compareFindings } from '../matching.mjs';
+import { compareFindings } from '../../shared/matching.mjs';
 import { scopeIdentifier } from '../findings.mjs';
 
 test('real step failure resolves only after passing on the explicitly mapped page', async () => {

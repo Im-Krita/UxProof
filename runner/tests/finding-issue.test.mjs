@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { displayViewportLabel, findingIssue } from '../matching.mjs';
+import { displayViewportLabel, findingIssue } from '../../shared/matching.mjs';
 import { humanStepError } from '../validators.mjs';
 
 const observation = (patch) => ({
