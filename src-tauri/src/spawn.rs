@@ -63,6 +63,59 @@ pub(crate) fn kill_pid(pid: u32) {
     }
 }
 
+pub(crate) fn kill_running_audit() {
+    if let Ok(guard) = CHILD_PID.lock() {
+        if let Some(pid) = *guard {
+            kill_pid(pid);
+        }
+    }
+}
+
+// BUG-028: TerminateProcess on UXProof.exe does not run Drop or Tauri Exit.
+// A Windows job with KILL_ON_JOB_CLOSE is closed by the kernel when the parent
+// handle table dies, so Node and Chromium go with it.
+#[cfg(windows)]
+mod job {
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Child;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    pub(super) struct KillOnCloseJob(HANDLE);
+
+    impl Drop for KillOnCloseJob {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0); }
+        }
+    }
+
+    pub(super) fn attach(child: &Child) -> Option<KillOnCloseJob> {
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return None;
+            }
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let sized = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&info).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            let process = child.as_raw_handle() as HANDLE;
+            if sized == 0 || AssignProcessToJobObject(job, process) == 0 {
+                CloseHandle(job);
+                return None;
+            }
+            Some(KillOnCloseJob(job))
+        }
+    }
+}
+
 fn kill_tree(child: &mut std::process::Child) {
     #[cfg(windows)]
     {
@@ -110,6 +163,8 @@ pub(crate) fn run_node(script: &Path, input: &[u8], node: &Path, browsers: Optio
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Не удалось запустить Node.js: {e}"))?;
+    #[cfg(windows)]
+    let _job = job::attach(&child);
     *CHILD_PID.lock().map_err(|e| e.to_string())? = Some(child.id());
     struct ClearPid;
     impl Drop for ClearPid {
@@ -263,6 +318,38 @@ mod tests {
         assert!(select_runner(&dev, &bundled, false).is_err());
         std::fs::remove_file(&dev).unwrap();
         std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn closing_the_job_kills_node_and_its_child() {
+        use std::sync::mpsc;
+        let mut child = Command::new("node")
+            .args(["-e", "const {spawn}=require('child_process'); const g=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); process.stdout.write(String(g.pid)); setInterval(()=>{},1000);"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let job = job::attach(&child).expect("Windows job object");
+        let mut stdout = child.stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut buf = [0u8; 16];
+            let n = stdout.read(&mut buf).unwrap_or(0);
+            let _ = tx.send(std::str::from_utf8(&buf[..n]).ok().and_then(|text| text.trim().parse::<u32>().ok()));
+        });
+        let grandchild = rx.recv_timeout(Duration::from_secs(8)).expect("grandchild pid").expect("parse pid");
+        assert!(process_alive(child.id()), "node parent should be running before the job closes");
+        assert!(process_alive(grandchild), "node child should be running before the job closes");
+        drop(job);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if !process_alive(child.id()) && !process_alive(grandchild) { break; }
+            thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!process_alive(child.id()), "node parent survived job close");
+        assert!(!process_alive(grandchild), "node child survived job close");
+        let _ = child.try_wait();
     }
 
     #[test]

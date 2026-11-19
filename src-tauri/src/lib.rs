@@ -99,8 +99,13 @@ pub fn run() {
             commands::export_xlsx,
             commands::plan_steps
         ])
-        .run(tauri::generate_context!())
-        .expect("error running UXProof");
+        .build(tauri::generate_context!())
+        .expect("error running UXProof")
+        .run(|_app, event| {
+            if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+                spawn::kill_running_audit();
+            }
+        });
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 
 Windows-first приложение для проверки **реальных пользовательских действий** в веб-интерфейсе. Tauri 2 + Rust orchestrator, React/TypeScript UI, Playwright browser runner, axe-core accessibility, опциональный ИИ (OpenAI Responses API или локальный Ollama).
 
-**Статус:** разработка продолжается. Сборки MSI и NSIS содержат Node.js и Chromium; запуск извлечённых файлов проверен в изолированном окружении. Установка на чистую Windows VM и полный сценарий Tauri IPC ещё не проверены. Актуальные ограничения: `docs/CORE-IMPLEMENTATION-STATUS.md`.
+**Статус:** MVP собран и проверен локально (19 ноября 2026). Сборки MSI и NSIS содержат Node.js и Chromium. IPC-прогон в release-окне: 9/9. MSI ставился на машину `mono` (Win10, без Node в PATH; WebView2 там уже был — это не чистый образ). Актуальные ограничения и чеклист VM: `docs/CORE-IMPLEMENTATION-STATUS.md`, `docs/VM-ACCEPTANCE.md`.
 
 ## Быстрый старт — режим разработки (Windows)
 
@@ -44,7 +44,7 @@ npm run tauri dev       # запускает Vite + окно Tauri 2
 
 Для Windows x64 `npm run tauri build` подготавливает встроенные Node.js и Chromium и создаёт MSI/NSIS. На машине сборки нужен точный официальный `node.exe` версии 24.14.1: сборщик проверяет SHA-256 и по умолчанию использует текущий Node; другой путь можно указать через `UXPROOF_NODE_BINARY`. Предварительно установите зависимости runner и Chromium Headless Shell соответствующей версии Playwright (`cd runner; npx playwright install --only-shell chromium; cd ..`). При нестандартном кэше задайте `PLAYWRIGHT_BROWSERS_PATH`. Каждый включаемый файл Chromium сверяется с манифестом SHA-256, сформированным из архива Chrome for Testing, полученного по HTTPS с официального хранилища Google; обновление ревизии требует обновить манифест. Отдельная криптографическая подпись архива не проверялась. `npm run test:portable` проверяет запуск упакованных ресурсов вне checkout с изолированными PATH и браузерным кэшем.
 
-MSI был распакован и его runner с встроенными Node и Chromium выполнил аудит в изолированном окружении. Полная установка и Tauri IPC на чистой Windows VM ещё не подтверждены; WebView2 и требования Windows также нужно проверить на целевой системе.
+MSI распаковывался без установки: встроенные Node и Chromium прогоняют аудит вне checkout (`npm run test:portable`). 19 ноября тот же MSI ставился на `mono` (`msiexec /qn`, `C:\Program Files\UXProof`): системного Node нет, аудит шёл bundled runtime, окно через IPC дало 9/9. Автоустановку WebView2 на чистой машине без рантайма не наблюдали. Закрытие окна во время прогона снимает sidecar через Windows Job Object (BUG-028).
 
 ## Что делает v0.1
 
@@ -125,7 +125,7 @@ npm run qa:ipc                # прогон аудита в собранном 
 
 CI — `.github/workflows/ci.yml`: обязательная job (runner-тесты, сборка UI, `cargo test`), отдельная job с Relay для `test:edge`/`test:fix`/`smoke` и ночной `test:portable`.
 
-Дополнительные критерии приёмки — `docs/TEST_PLAN.md` и `docs/VALIDATION.md`.
+Дополнительные критерии приёмки — `docs/TEST_PLAN.md`. Срез готовности — `docs/FEATURE-MATRIX.md`. `docs/VALIDATION.md` — архив от 15 ноября, не текущий статус.
 
 ## MCP и локальный API
 

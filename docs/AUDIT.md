@@ -89,6 +89,12 @@ Upgrade `ws://` шёл через `pipe()` без потолка туннеля.
 
 Исправление: `runner/audit-lock.mjs` уважает `UXPROOF_LOCK_HELD=1`, который выставляет Rust-сторона при спавне (`spawn.rs`); CLI и dev API по-прежнему берут lock сами. Проверено `scripts/qa-ipc.mjs` в release-окне.
 
+## BUG-028 — закрытие окна не убивает sidecar Node и Chromium
+
+На `mono` во время живого аудита `Stop-Process uxproof` завершил только `UXProof.exe`. Через 12+ секунд в диспетчере оставались `C:\Program Files\UXProof\runtime\node.exe` и несколько `chrome-headless-shell.exe`. `cancel_audit` убивает дерево через PID, закрытие окна — нет: `TerminateProcess` не вызывает Drop и Tauri `Exit`.
+
+Исправление: каждый sidecar Node помещается в Windows Job Object с `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. Когда гибнет `UXProof.exe`, ядро закрывает handle джоба и снимает Node вместе с Chromium. На штатном выходе дополнительно вызывается `kill_running_audit`. Регрессия: `spawn::tests::closing_the_job_kills_node_and_its_child`.
+
 ## BUG-027 — интеграционный тест MCP искал файлы не в том каталоге
 
 `mcp-client.integration.test.mjs` собирал пути от `runner/tests` вместо `runner`, поэтому `node` запускал несуществующий `runner/tests/mcp-server.mjs` и тест висел до таймаута. Путь исправлен на `path.resolve(import.meta.dirname, '..')`; прогон также получил собственный временный `UXPROOF_RUNS_DIR`, чтобы не зависеть от остальных тестов.

@@ -1,12 +1,13 @@
 # План проверки и приёмки — UXProof v0.1
 
-**Это список запланированных проверок, не отчёт об их прохождении.** Фактические результаты см. `VALIDATION.md` и `FINAL-AUDIT-REPORT.md`.
+**Это список запланированных проверок, не отчёт об их прохождении.** Фактические результаты см. `FEATURE-MATRIX.md`, `CORE-IMPLEMENTATION-STATUS.md` и `VM-ACCEPTANCE.md`. `VALIDATION.md` и `FINAL-AUDIT-REPORT.md` — срезы 15 ноября.
 
 Статус автоматизации на 19.11.2026:
 
-- `npm run test:runner` — 125 тестов, 124 pass, 1 skip (HTTPS-прокси без Python `cryptography`).
-- `cargo test --locked` — 17/17.
+- `npm run test:runner` — 128 тестов, 127 pass, 1 skip (HTTPS-прокси без Python `cryptography`).
+- `cargo test` — 19/19 (включая Job Object: sidecar гибнет вместе с родителем).
 - `npm run build` — успешно.
+- Живые прогоны: `qa:ollama`, `qa:ipc` (release-окно), MSI на `mono`.
 
 Соответствие проверок автотестам:
 
@@ -32,7 +33,7 @@
 | QA-30 (окно), QA-49 | `scripts/qa-ipc.mjs` в release-окне через WebView2 CDP |
 | QA-42 (MCP-клиент), QA-50 | `runner/tests/mcp-client.integration.test.mjs` |
 
-Ручные и непроверенные пункты: QA-19, QA-31, QA-36, QA-38, а также установка MSI на чистую VM — `docs/VM-ACCEPTANCE.md`.
+Ручные и непроверенные пункты: QA-19 (живой платный OpenAI), QA-36 (login-экран). QA-30/QA-38/QA-49 закрыты release-окном и MSI на `mono`; чистый образ без WebView2 — всё ещё `docs/VM-ACCEPTANCE.md`.
 
 Легенда: **авто** — покрыто тестом, **ручной** — нужен прогон человеком, **нет** — не проверялось.
 

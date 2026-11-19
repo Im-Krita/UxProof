@@ -3,7 +3,7 @@
 ## Срез 19.11.2026 (волны 0–10)
 
 - **W0/W1.** Единый браузер-безопасный контракт в `shared/`: `matching.mjs` и `geometry-view.mjs` вынесены из `runner/`, UI-импорт из `runner/` остался только `history.mjs`. URL-таблица `shared/url-golden.json` проверяется тестом против UI и `validateConfig`. Импорт проекта проходит тот же валидатор, что и запуск. История отдаёт `skipped`; Rust фильтрует записи так же, как Node.
-- **W2.** Один каталог прогонов через `UXPROOF_RUNS_DIR`; CLI, dev API и Tauri используют одну семантику `.audit.lock` (пустой lock занят до 20 минут, живой PID не отбирается). Trace и Excel доступны через IPC. Отмена в Tauri — `cancel_audit`, не `AbortSignal`. Установка MSI на чистой VM **не проверена** (`docs/VM-ACCEPTANCE.md`).
+- **W2.** Один каталог прогонов через `UXPROOF_RUNS_DIR`; CLI, dev API и Tauri используют одну семантику `.audit.lock` (пустой lock занят до 20 минут, живой PID не отбирается). Trace и Excel доступны через IPC. Отмена в Tauri — `cancel_audit`, не `AbortSignal`. MSI ставился на `mono`; образ без WebView2 — `docs/VM-ACCEPTANCE.md`.
 - **W3/W4.** Опциональная строгая схема отчёта проверяется `report-schema.test.mjs`; сравнение `/` → `/fixed` закреплено интеграционными тестами. Геометрия показывается в карточке как viewport×DPR с явным «геометрия отсутствует». Старые `input.json` удаляются при старте Tauri.
 - **W5.** `runner/detectors.mjs` исполняет все правила реестра: `layout:viewport-overflow`, `layout:min-tap-target`, `layout:text-overflow`, `copy:duplicate-heading`, `copy:repeated-button-name`. Падение одного детектора не валит аудит.
 - **W6.** Разрезаны `audit.mjs` (`audit-control.mjs`, `audit-finalize.mjs`, `detectors.mjs`), `lib.rs` (`url.rs`, `spawn.rs`, `commands.rs`) и `App.tsx` (`components/ReportSection.tsx`, `lib/format.tsx`).
@@ -12,17 +12,17 @@
 - **W9a.** `runner/planner.mjs`: модель → JSON шагов → `sanitizePlan` → общий `validateConfig`. Неизвестные типы, небезопасные значения и off-origin `navigate` отбрасываются. UI показывает превью и применяет план только по кнопке.
 - **W10.** Матрица, этот файл, `TEST_PLAN.md` и `PITCH.md` приведены к фактическому состоянию; Relay получил маршруты `/settings`, `/servers`, `/login` и `/fixed/...`.
 
-Итог прогонов 19.11.2026: `test:runner` 128 (127 pass, 1 skip без Python `cryptography`), `cargo test --locked` 18/18, `npm run build` успешно, живой Ollama (`npm run qa:ollama`) и IPC-прогон в release-окне (`npm run qa:ipc`).
+Итог прогонов 19.11.2026: `test:runner` 128 (127 pass, 1 skip без Python `cryptography`), `cargo test` 19/19, `npm run build` успешно, живой Ollama (`npm run qa:ollama`), IPC в release-окне (`npm run qa:ipc`), MSI на `mono`.
 
 ## Срез 19.11.2026
 
-Проверено на Windows: `test:runner` — 128 тестов (127 pass, 1 пропуск HTTPS-теста без Python `cryptography`), `cargo test --locked` — 18/18, `npm run build` — успешно. MSI/NSIS собираются, release содержит встроенные Node 24.14.1 и Chromium Headless Shell.
+Проверено на Windows: `test:runner` — 128 тестов (127 pass, 1 пропуск HTTPS-теста без Python `cryptography`), `cargo test` — 19/19, `npm run build` — успешно. MSI/NSIS собираются, release содержит встроенные Node 24.14.1 и Chromium Headless Shell.
 
 | Волна | Что сделано | Статус |
 |---|---|---|
 | W0 | CI: обязательная job (runner, build, Rust), отдельная integration с Relay, nightly portable; общие модули `shared/matching.mjs`, `shared/geometry-view.mjs`, `shared/policy-core.mjs`, `shared/config-check.mjs` вне Vite-импорта `runner/` (кроме `history.mjs`) | частично: остался `runner/history.mjs` в UI-бандле |
 | W1 | Один валидатор проекта для импорта (`shared/config-check.mjs`), `skipped` в истории (Node и Rust), golden-таблица URL (`shared/url-golden.json`, `url-golden.test.mjs`), лимиты конфигурации | готово |
-| W2 | Один каталог прогонов через `UXPROOF_RUNS_DIR`, одинаковая семантика `.audit.lock` в Node и Rust, `cancel_audit` вместо AbortSignal, trace через IPC | готово, кроме установки на чистую VM |
+| W2 | Один каталог прогонов через `UXPROOF_RUNS_DIR`, одинаковая семантика `.audit.lock` в Node и Rust, `cancel_audit` вместо AbortSignal, trace через IPC | готово; MSI на `mono` (не чистый образ без WebView2) |
 | W3 | Опциональная строгая схема отчёта (`report-schema.test.mjs`), сравнение `/` → `/fixed` закреплено тестами | готово с оговорками якорей |
 | W4 | Геометрия в карточке с подписью viewport×DPR, trace и `input.json` через IPC, нативный checkbox ИИ | готово: живая Ollama проверена `npm run qa:ollama` |
 | W5 | `runner/detectors.mjs`: три новых правила реестра, отключение через `disabledRules`, падение детектора не валит аудит | базовый реестр готов |
@@ -32,7 +32,7 @@
 | W9a | `runner/planner.mjs`: генерация шагов, sanitize, общий `validateConfig`, превью и подтверждение в UI | готово: живой `qwen2.5:3b` проверен `npm run qa:ollama` |
 | W10 | FEATURE-MATRIX, CORE, TEST_PLAN, demo, PITCH | этот срез |
 
-Не закрыто кодом: полная установка MSI на чистую Windows VM (см. `docs/VM-ACCEPTANCE.md`), первый hop HTTP-redirect без MITM, fuzzy UX-регрессии, полный WCAG и поиск всех секретов на PNG. Живые прогоны модели, планировщика, MCP-клиента и IPC в собранном окне выполнены 19.11.2026.
+Не закрыто: установка MSI на образ **без** WebView2 и без прочего софта (см. `docs/VM-ACCEPTANCE.md`), первый hop HTTP-redirect без MITM, fuzzy UX-регрессии, полный WCAG и поиск всех секретов на PNG. Живые прогоны модели, планировщика, MCP-клиента, IPC в окне и MSI на `mono` выполнены 19.11.2026.
 
 ## C03 — контракт результатов: начато
 
@@ -50,13 +50,13 @@
 
 Раньше управление окном не удавалось: средства захвата возвращали пустое изображение (`PrintWindow` для WebView2), геометрия кнопки отсутствовала. Теперь окно управляется через WebView2 CDP (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`) и `scripts/qa-ipc.mjs`: скрипт нажимает «Запустить аудит», ждёт панель результатов и проверяет счётчики. Прогон в release-сборке: 9/9 сценариев, 3 подтверждённых дефекта, 0 замечаний доступности, кнопки JSON/Excel/HTML на месте.
 
-До исправления два окна-специфичных дефекта полностью блокировали запуск: verbatim-путь `\\?\` в аргументе Node (BUG-025) и повторный захват уже занятого `.audit.lock` (BUG-026). Debug-сборка и dev API их не проявляли. Остаётся установка MSI на чистую Windows VM.
+До исправления два окна-специфичных дефекта полностью блокировали запуск: verbatim-путь `\\?\` в аргументе Node (BUG-025) и повторный захват уже занятого `.audit.lock` (BUG-026). Debug-сборка и dev API их не проявляли. Закрытие окна оставляло Node и Chromium (BUG-028) — sidecar теперь в Job Object `KILL_ON_JOB_CLOSE`; на `mono` после `Stop-Process uxproof` через 8 с sidecars нет. MSI ставился на `mono` (Win10, WebView2 уже был). Остаётся образ без WebView2.
 
 ## C02 — состав ресурсов: частично
 
 Упаковка перечисляет файлы runner и каталоги зафиксированных зависимостей явно, а не включает весь `runner`. Release выбирает упакованный runner даже при наличии исходного checkout. Тест собрал разрешённые ресурсы во временном каталоге вне checkout и выполнил реальный аудит Chromium. При сборке MSI и NSIS два фиктивных приватных файла в корне `runner` отсутствовали в обоих сгенерированных манифестах; необходимые runner и Playwright присутствовали. Каталоги выбранных зависимостей по-прежнему включаются целиком и требуют контроля содержимого и supply chain.
 
-В Windows x64 release добавлены встроенные Node 24.14.1 и Playwright Chromium Headless Shell revision 1255. Сборщик проверяет Node по официальному SHA-256, включает его лицензию, копирует Chromium из локального кэша по ограниченному списку файлов и записывает метаданные и хэши. Все 288 включаемых файлов Chromium сверяются по SHA-256 с манифестом, сформированным из Chrome for Testing 159.0.8154.6, полученного по HTTPS с официального хранилища Google (SHA-256 архива `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`). Отдельная подпись архива не проверялась. Тест подтверждает отказ при изменённом кэше без удаления предыдущего runtime. После пересборки MSI распакован без установки: все 288 файлов Chromium совпали с манифестом; затем временная распаковка удалена. Release выбирает встроенные бинарники и задаёт отдельный каталог браузеров; debug сохраняет системный Node. `npm run test:portable` запускает реальный аудит вне checkout с изолированным PATH и LOCALAPPDATA; 11 Rust-тестов прошли. MSI и NSIS собраны (около 164 и 116 МиБ); MSI распакован без установки, извлечённый runner выполнил аудит встроенными Node и Chromium с изолированным PATH и LOCALAPPDATA. Полная установка, WebView2 и работа через Tauri IPC на чистой Windows VM не проверены. C02 остаётся незавершённой.
+В Windows x64 release добавлены встроенные Node 24.14.1 и Playwright Chromium Headless Shell revision 1255. Сборщик проверяет Node по официальному SHA-256, включает его лицензию, копирует Chromium из локального кэша по ограниченному списку файлов и записывает метаданные и хэши. Все 288 включаемых файлов Chromium сверяются по SHA-256 с манифестом, сформированным из Chrome for Testing 159.0.8154.6, полученного по HTTPS с официального хранилища Google (SHA-256 архива `5db6a6948e6d1299ea3bc87c420d467bf343feae186a316921c930ce02056af5`). Отдельная подпись архива не проверялась. Тест подтверждает отказ при изменённом кэше без удаления предыдущего runtime. После пересборки MSI распакован без установки: все 288 файлов Chromium совпали с манифестом; затем временная распаковка удалена. Release выбирает встроенные бинарники и задаёт отдельный каталог браузеров; debug сохраняет системный Node. `npm run test:portable` запускает реальный аудит вне checkout с изолированным PATH и LOCALAPPDATA; 19 Rust-тестов прошли. MSI и NSIS собраны (около 164 и 116 МиБ). 19.11.2026 MSI установлен на `mono`: `where node` пуст, аудит шёл `runtime\node.exe`, IPC-окно 9/9. Автоустановку WebView2 на машине без рантайма не видели. C02 остаётся незавершённой, пока нет чистого образа.
 
 ## C04 — сравнение: начато
 
@@ -66,7 +66,7 @@
 
 ## C05 — блокировка IPC: частично
 
-В Rust добавлена блокировка аудита на время рабочего процесса и файловая блокировка между экземплярами Tauri с общей папкой app-data. Guard передаётся рабочему потоку и освобождается при завершении или ошибке. Тест Rust проверяет отказ второго процесса, повторный запуск после освобождения, параллельные потоки и освобождение при ошибке и panic. Блокировка web dev API остаётся отдельной; полноценная проверка IPC в окне, тесты упаковки и остальные задачи C05 ещё не выполнены.
+В Rust добавлена блокировка аудита на время рабочего процесса и файловая блокировка между экземплярами Tauri с общей папкой app-data. Guard передаётся рабочему потоку и освобождается при завершении или ошибке. Тест Rust проверяет отказ второго процесса, повторный запуск после освобождения, параллельные потоки и освобождение при ошибке и panic. IPC в release-окне проверен `qa:ipc` (9/9). Блокировка web dev API остаётся отдельной; первый hop HTTP-redirect и полная изоляция ОС — нет.
 
 Chromium использует локальный аутентифицированный HTTP-прокси: он проверяет адреса и подключается только к полученным разрешённым IP. Кэш DNS между запросами удалён, для DNS установлен таймаут 5 секунд; изменившиеся адреса базового домена отклоняются. Исправлено распознавание IPv4-mapped IPv6, IPv6 link-local и well-known NAT64 `64:ff9b::/96`. Прокси ограничен 128 одновременными входящими соединениями и 10 000 HTTP-запросами/созданиями туннеля за аудит; число отдельных HTTPS-запросов внутри туннеля не подсчитывается. При достижении лимита отчёт помечается неполным.
 
