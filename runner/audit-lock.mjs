@@ -38,6 +38,10 @@ export function defaultRunsDir() {
 }
 
 export function acquireRunsLock(runsDir = defaultRunsDir()) {
+  // The desktop app holds an exclusive OS lock on the same file for the whole
+  // IPC call. Its sidecar cannot create the file again, and re-reading the
+  // app's own live pid would look like a conflict, so the child skips locking.
+  if (process.env.UXPROOF_LOCK_HELD === '1') return () => {};
   fs.mkdirSync(runsDir, { recursive: true });
   const lockPath = path.join(runsDir, '.audit.lock');
   for (let attempt = 0; attempt < 2; attempt++) {

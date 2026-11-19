@@ -43,7 +43,7 @@ describe('cancel', { concurrency: false }, () => {
       const body = await response.json();
       assert.equal(response.status, 409);
       assert.match(body.error, /Нет выполняющейся проверки/);
-      const history = await fetch(`http://127.0.0.1:${port}/api/history`, { signal: AbortSignal.timeout(8000) });
+      const history = await fetch(`http://127.0.0.1:${port}/api/history`, { headers: { 'X-UXProof-Client': '1' }, signal: AbortSignal.timeout(8000) });
       assert.equal(history.status, 200);
     } finally {
       child.kill();

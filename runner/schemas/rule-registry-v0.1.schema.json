@@ -20,7 +20,13 @@
           { "type": "object", "additionalProperties": false, "required": ["type", "toleranceCssPx"],
             "properties": { "type": { "const": "viewport-overflow" }, "toleranceCssPx": { "type": "number", "minimum": 0, "maximum": 20 } } },
           { "type": "object", "additionalProperties": false, "required": ["type", "minOccurrences"],
-            "properties": { "type": { "const": "duplicate-headings" }, "minOccurrences": { "const": 2 } } }
+            "properties": { "type": { "const": "duplicate-headings" }, "minOccurrences": { "const": 2 } } },
+          { "type": "object", "additionalProperties": false, "required": ["type", "minSizeCssPx"],
+            "properties": { "type": { "const": "min-tap-target" }, "minSizeCssPx": { "type": "integer", "minimum": 16, "maximum": 48 } } },
+          { "type": "object", "additionalProperties": false, "required": ["type", "minOverflowPx"],
+            "properties": { "type": { "const": "text-overflow" }, "minOverflowPx": { "type": "integer", "minimum": 1, "maximum": 16 } } },
+          { "type": "object", "additionalProperties": false, "required": ["type", "minOccurrences"],
+            "properties": { "type": { "const": "repeated-button-name" }, "minOccurrences": { "type": "integer", "minimum": 2, "maximum": 5 } } }
         ] },
         "exclusions": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
         "classification": { "enum": ["technical-fact", "semantic-hypothesis"] }, "remediation": { "type": "string", "minLength": 1 },
@@ -29,7 +35,10 @@
       },
       "allOf": [
         { "if": { "properties": { "trigger": { "properties": { "type": { "const": "viewport-overflow" } } } } }, "then": { "properties": { "classification": { "const": "technical-fact" } } } },
-        { "if": { "properties": { "trigger": { "properties": { "type": { "const": "duplicate-headings" } } } } }, "then": { "properties": { "classification": { "const": "semantic-hypothesis" } } } }
+        { "if": { "properties": { "trigger": { "properties": { "type": { "const": "duplicate-headings" } } } } }, "then": { "properties": { "classification": { "const": "semantic-hypothesis" } } } },
+        { "if": { "properties": { "trigger": { "properties": { "type": { "const": "min-tap-target" } } } } }, "then": { "properties": { "classification": { "const": "technical-fact" } } } },
+        { "if": { "properties": { "trigger": { "properties": { "type": { "const": "text-overflow" } } } } }, "then": { "properties": { "classification": { "const": "technical-fact" } } } },
+        { "if": { "properties": { "trigger": { "properties": { "type": { "const": "repeated-button-name" } } } } }, "then": { "properties": { "classification": { "const": "semantic-hypothesis" } } } }
       ]
     }
   }

@@ -60,7 +60,7 @@ test('a failed step has its own screenshot instead of the final run screenshot',
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });
@@ -89,7 +89,7 @@ test('a failed error screenshot is not replaced with a later screenshot', async 
     await fs.rmdir(path.join(shots, 'error-1-1-1.png'));
     for (const file of await fs.readdir(shots)) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots);
-    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });
@@ -115,7 +115,7 @@ test('manifest write failure leaves an incomplete report instead of a false mani
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
     await fs.rmdir(path.join(dir, 'artifacts.json'));
-    for (const file of ['report.json', 'report.html']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'report.xlsx']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });

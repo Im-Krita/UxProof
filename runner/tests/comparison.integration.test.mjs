@@ -38,7 +38,7 @@ test('real step failure resolves only after passing on the explicitly mapped pag
       const dir = path.join(root, name), shots = path.join(dir, 'screenshots');
       for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
       await fs.rmdir(shots).catch(() => {});
-      for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+      for (const file of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
       await fs.rmdir(dir).catch(() => {});
     }
     await fs.rmdir(root);

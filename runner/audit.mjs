@@ -4,82 +4,25 @@ import { chromium } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { executeStep, humanStepError, validateConfig, evidenceType } from './validators.mjs';
 import { reviewScreenshot } from './ai.mjs';
-import { renderHtml } from './html.mjs';
 import { assertRequestAllowed, prepareBasePolicy } from './policy.mjs';
-import { axeObservations, countedObservation, failedStepObservation, groupObservations, scopeIdentifier } from './findings.mjs';
+import { axeObservations, countedObservation, failedStepObservation, scopeIdentifier } from './findings.mjs';
 import { comparisonKey, comparisonProfileKey } from './comparison.mjs';
-import { validateNormalizedReport } from './report-contract.mjs';
 import { screenshotWithRedaction } from './screenshot.mjs';
 import { startGuardProxy } from './guard-proxy.mjs';
-import { writeArtifactManifest } from './artifacts.mjs';
-import { stepEvent, validateScenarioEvents } from './events.mjs';
+import { stepEvent } from './events.mjs';
 import { collectDomSummary } from './dom-summary.mjs';
 import { collectElementGeometry, sameElementGeometry } from './element-geometry.mjs';
 import { viewportOverflow, enabledRule } from './rules.mjs';
 import { collectDuplicateHeadings } from './copy-headings.mjs';
+import { runDetectors } from './detectors.mjs';
+import {
+  CancelledError, ConflictError, IdleError, acquireAuditLock, cancelRunningAudit,
+  clearActiveBrowser, isCancelRequested, resetCancel, setActiveBrowser
+} from './audit-control.mjs';
+import { finalizeReport, maxDurationMs } from './audit-finalize.mjs';
 
-let runActive = false;
-let activeBrowser = null;
-let shutdownBound = false;
-let cancelRequested = false;
+export { CancelledError, ConflictError, IdleError, acquireAuditLock, cancelRunningAudit };
 
-export class ConflictError extends Error {
-  constructor() {
-    super('Уже выполняется другая проверка. Дождитесь её завершения.');
-    this.name = 'ConflictError';
-  }
-}
-
-export class IdleError extends Error {
-  constructor() {
-    super('Нет выполняющейся проверки');
-    this.name = 'IdleError';
-  }
-}
-
-export class CancelledError extends Error {
-  constructor() {
-    super('Проверка остановлена');
-    this.name = 'CancelledError';
-  }
-}
-
-export function cancelRunningAudit() {
-  if (!runActive) throw new IdleError();
-  cancelRequested = true;
-  const browser = activeBrowser;
-  if (browser) browser.close().catch(() => {});
-}
-
-export function acquireAuditLock() {
-  if (runActive) throw new ConflictError();
-  runActive = true;
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    runActive = false;
-  };
-}
-
-function bindShutdown() {
-  if (shutdownBound) return;
-  shutdownBound = true;
-  const stop = () => {
-    const browser = activeBrowser;
-    activeBrowser = null;
-    const closing = browser ? browser.close().catch(() => {}) : Promise.resolve();
-    closing.finally(() => process.exit(130));
-  };
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
-}
-
-function maxDurationMs() {
-  const requested = Number(process.env.UXPROOF_MAX_MS || 12 * 60 * 1000);
-  if (!Number.isFinite(requested)) return 12 * 60 * 1000;
-  return Math.min(20 * 60 * 1000, Math.max(15_000, requested));
-}
 
 async function executeAudit(raw) {
   const config = validateConfig(raw);
@@ -116,16 +59,15 @@ async function executeAudit(raw) {
       report.warnings.push(`Заблокирован запрос: ${note}`);
     }
   };
-  bindShutdown();
   try {
     proxy = await startGuardProxy({ baseUrl: config.baseUrl, basePolicy, onBlocked: recordBlocked });
     browser = await chromium.launch({ headless: true, timeout: 45000, args: ['--disable-extensions', '--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] });
-    activeBrowser = browser;
+    setActiveBrowser(browser);
     outer: for (let sIdx = 0; sIdx < config.scenarios.length; sIdx++) {
       const scenario = config.scenarios[sIdx];
       const maskTextValues = scenario.steps.filter(step => ['fill', 'expectValue'].includes(step.type) && typeof step.value === 'string').map(step => step.value);
       for (let vIdx = 0; vIdx < config.viewports.length; vIdx++) {
-        if (cancelRequested) break outer;
+        if (isCancelRequested()) break outer;
         if (Date.now() > deadline) {
           report.status = 'incomplete';
           report.warnings.push('Проверка остановлена: превышено максимальное время');
@@ -158,12 +100,21 @@ async function executeAudit(raw) {
           const projectOrigin = new URL(config.baseUrl).origin;
           let pageErrorCount = 0;
           let mainPage;
+          let axeRunning = false;
+          const extraPages = new Set();
+          // axe-core/playwright injects its source through a helper about:blank
+          // page. Closing every extra page kills that helper mid-analysis, so a
+          // blank helper is kept (with all requests aborted) until axe finishes.
+          const closeExtraPages = () => {
+            for (const extra of extraPages) extra.close().catch(() => {});
+            extraPages.clear();
+          };
           context.on('page', nextPage => {
             nextPage.on('pageerror', () => { pageErrorCount = Math.min(pageErrorCount + 1, 1000); });
-            if (mainPage && nextPage !== mainPage) {
-              nextPage.route('**/*', route => route.abort('blockedbyclient')).catch(() => {});
-              nextPage.close().catch(() => {});
-            }
+            if (!mainPage || nextPage === mainPage) return;
+            nextPage.route('**/*', route => route.abort('blockedbyclient')).catch(() => {});
+            if (axeRunning && nextPage.url() === 'about:blank') { extraPages.add(nextPage); return; }
+            nextPage.close().catch(() => {});
           });
           const page = await context.newPage();
           mainPage = page;
@@ -322,6 +273,7 @@ async function executeAudit(raw) {
             if (!outsideOrigin) { try { assertCurrentOrigin(); } catch { /* incident recorded above */ } }
             if (!outsideOrigin) {
             try {
+              axeRunning = true;
               const resultAxe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa']).analyze();
               for (const violation of resultAxe.violations.slice(0, 15)) {
                 observations.push(...axeObservations({ violation, pageUrl: page.url(), runId,
@@ -336,6 +288,9 @@ async function executeAudit(raw) {
               }
             } catch (error) {
               report.warnings.push(`axe ${scenario.title}/${viewportLabel}: ${String(error.message || error).slice(0, 160)}`);
+            } finally {
+              axeRunning = false;
+              closeExtraPages();
             }
             try {
               const overflow = viewportOverflow(await page.evaluate(() => ({ actual: document.documentElement.scrollWidth, expected: window.innerWidth })), config.options?.disabledRules);
@@ -352,6 +307,26 @@ async function executeAudit(raw) {
                 });
               }
             } catch { /* страница уже закрыта */ }
+            if (navigationLoaded && !outsideOrigin) {
+              try {
+                const detected = await runDetectors({
+                  page,
+                  isEnabled: ruleId => enabledRule(ruleId, config.options?.disabledRules),
+                  makeObservation: ({ ruleId, source, classification, status, token }) => countedObservation({
+                    pageUrl: page.url(), runId, scenarioId: String(scenario.id || `index:${sIdx}`), viewportId: String(vp.id || `index:${vIdx}`),
+                    ruleId, source, classification, status, token
+                  }),
+                  makeIssue: issue => ({ id: `${issue.kind === 'copy' ? 'COPY' : 'LAYOUT'}-${report.issues.length + 1}`, ...issue }),
+                  title: scenario.title, viewport: viewportLabel, scopeIds
+                });
+                observations.push(...detected.observations);
+                report.issues.push(...detected.issues);
+                assertCurrentOrigin();
+              } catch (error) {
+                if (outsideOrigin) throw Error('Переход за пределы адреса проекта');
+                report.warnings.push(`Дополнительные правила ${scenario.title}/${viewportLabel}: ${String(error?.message || error).slice(0, 140)}`);
+              }
+            }
             }
           } catch (error) {
             const message = String(error.message || error).split('\n')[0].slice(0, 400);
@@ -488,52 +463,22 @@ async function executeAudit(raw) {
       }
     }
   } finally {
-    activeBrowser = null;
+    clearActiveBrowser();
     if (browser) await browser.close().catch(() => {});
     if (proxy) await proxy.close().catch(() => {});
   }
-  if (cancelRequested) throw new CancelledError();
+  if (isCancelRequested()) throw new CancelledError();
   report.durationMs = Date.now() - start;
-  report.normalizedFindings = groupObservations(observations);
-  validateNormalizedReport(report);
-  validateScenarioEvents(report);
-  report.summary = {
-    totalRuns: report.results.length,
-    passedRuns: report.results.filter(item => item.status === 'passed').length,
-    failedRuns: report.results.filter(item => item.status === 'failed').length,
-    confirmedIssues: report.issues.filter(item => item.status === 'confirmed').length,
-    aiSuggestions: report.issues.filter(item => item.kind === 'ai-ux' && item.status === 'recommendation').length,
-    ruleSuggestions: report.issues.filter(item => item.kind !== 'ai-ux' && item.status === 'recommendation').length,
-    accessibilityIssues: report.issues.filter(item => item.kind === 'accessibility').length
-  };
-  report.artifactManifest = 'artifacts.json';
-  await fs.writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
-  await fs.writeFile(path.join(outputDir, 'report.html'), renderHtml(report), 'utf8');
-  const screenshotNames = [
-    ...report.results.flatMap(result => [result.screenshot, ...result.steps.map(step => step.screenshot)]),
-    ...report.issues.map(issue => issue.screenshot),
-    ...report.scenarioEvents.map(event => event.screenshot),
-    ...report.normalizedFindings.flatMap(finding => finding.observations.map(observation => observation.evidence?.screenshot))
-  ].filter(name => typeof name === 'string' && name);
-  try {
-    await writeArtifactManifest(outputDir, runId, ['report.json', 'report.html', ...screenshotNames.map(name => `screenshots/${name}`), ...report.results.map(result => result.trace).filter(Boolean)]);
-  } catch (error) {
-    report.status = 'incomplete';
-    delete report.artifactManifest;
-    report.warnings.push(`Не удалось создать manifest артефактов: ${String(error?.message || error).slice(0, 160)}`);
-    await fs.writeFile(path.join(outputDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
-    await fs.writeFile(path.join(outputDir, 'report.html'), renderHtml(report), 'utf8');
-  }
-  return report;
+  return finalizeReport(report, observations, outputDir);
 }
 
 export async function runAudit(raw) {
   const release = acquireAuditLock();
-  cancelRequested = false;
+  resetCancel();
   try {
     return await executeAudit(raw);
   } finally {
-    cancelRequested = false;
+    resetCancel();
     release();
   }
 }

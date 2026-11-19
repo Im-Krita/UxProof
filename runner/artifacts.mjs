@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { isResolvedInside } from './policy.mjs';
 
-const validPath = value => value === 'report.json' || value === 'report.html' ||
+const validPath = value => value === 'report.json' || value === 'report.html' || value === 'report.xlsx' ||
   (typeof value === 'string' && (/^screenshots\/[a-zA-Z0-9_-]{1,160}\.png$/.test(value) || /^traces\/trace-[1-9]\d*-[1-9]\d*\.zip$/.test(value)));
 
 export async function writeArtifactManifest(outputDir, runId, relativePaths) {

@@ -16,7 +16,9 @@
     "test:edge": "node scripts/edge-cases.mjs",
     "test:fix": "node scripts/verify-fix.mjs",
     "check": "npm run test:runner && npm run build",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "qa:ollama": "node scripts/qa-ollama.mjs",
+    "qa:ipc": "node scripts/qa-ipc.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -25,11 +27,12 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@tauri-apps/cli": "^2.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
     "typescript": "^5.7.0",
-    "vite": "^7.0.0",
-    "@vitejs/plugin-react": "^5.0.0"
+    "vite": "^7.0.0"
   }
 }

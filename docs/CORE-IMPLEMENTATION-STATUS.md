@@ -1,4 +1,38 @@
-# Состояние реализации ядра
+﻿# Состояние реализации ядра
+
+## Срез 19.11.2026 (волны 0–10)
+
+- **W0/W1.** Единый браузер-безопасный контракт в `shared/`: `matching.mjs` и `geometry-view.mjs` вынесены из `runner/`, UI-импорт из `runner/` остался только `history.mjs`. URL-таблица `shared/url-golden.json` проверяется тестом против UI и `validateConfig`. Импорт проекта проходит тот же валидатор, что и запуск. История отдаёт `skipped`; Rust фильтрует записи так же, как Node.
+- **W2.** Один каталог прогонов через `UXPROOF_RUNS_DIR`; CLI, dev API и Tauri используют одну семантику `.audit.lock` (пустой lock занят до 20 минут, живой PID не отбирается). Trace и Excel доступны через IPC. Отмена в Tauri — `cancel_audit`, не `AbortSignal`. Установка MSI на чистой VM **не проверена** (`docs/VM-ACCEPTANCE.md`).
+- **W3/W4.** Опциональная строгая схема отчёта проверяется `report-schema.test.mjs`; сравнение `/` → `/fixed` закреплено интеграционными тестами. Геометрия показывается в карточке как viewport×DPR с явным «геометрия отсутствует». Старые `input.json` удаляются при старте Tauri.
+- **W5.** `runner/detectors.mjs` исполняет все правила реестра: `layout:viewport-overflow`, `layout:min-tap-target`, `layout:text-overflow`, `copy:duplicate-heading`, `copy:repeated-button-name`. Падение одного детектора не валит аудит.
+- **W6.** Разрезаны `audit.mjs` (`audit-control.mjs`, `audit-finalize.mjs`, `detectors.mjs`), `lib.rs` (`url.rs`, `spawn.rs`, `commands.rs`) и `App.tsx` (`components/ReportSection.tsx`, `lib/format.tsx`).
+- **W7.** Excel: `report.xlsx` рядом с `report.html`, листы «Сводка», «Проблемы», «Прогоны»; ZIP собирается без внешних зависимостей, контрольные суммы проверены `xlsx.test.mjs`; IPC `export_xlsx` и `/api/xlsx`; кнопка в отчёте.
+- **W8.** При заданном `UXPROOF_DEV_TOKEN` run/cancel/history/plan требуют токен (`X-UXProof-Token` или `Authorization: Bearer`); `X-UXProof-Client: 1` остаётся дополнительной проверкой. `runner/mcp-server.mjs` — stdio MCP (`run_audit`, `cancel`, `list_reports`, `get_report`) поверх dev API, без изображений.
+- **W9a.** `runner/planner.mjs`: модель → JSON шагов → `sanitizePlan` → общий `validateConfig`. Неизвестные типы, небезопасные значения и off-origin `navigate` отбрасываются. UI показывает превью и применяет план только по кнопке.
+- **W10.** Матрица, этот файл, `TEST_PLAN.md` и `PITCH.md` приведены к фактическому состоянию; Relay получил маршруты `/settings`, `/servers`, `/login` и `/fixed/...`.
+
+Итог прогонов 19.11.2026: `test:runner` 128 (127 pass, 1 skip без Python `cryptography`), `cargo test --locked` 18/18, `npm run build` успешно, живой Ollama (`npm run qa:ollama`) и IPC-прогон в release-окне (`npm run qa:ipc`).
+
+## Срез 19.11.2026
+
+Проверено на Windows: `test:runner` — 128 тестов (127 pass, 1 пропуск HTTPS-теста без Python `cryptography`), `cargo test --locked` — 18/18, `npm run build` — успешно. MSI/NSIS собираются, release содержит встроенные Node 24.14.1 и Chromium Headless Shell.
+
+| Волна | Что сделано | Статус |
+|---|---|---|
+| W0 | CI: обязательная job (runner, build, Rust), отдельная integration с Relay, nightly portable; общие модули `shared/matching.mjs`, `shared/geometry-view.mjs`, `shared/policy-core.mjs`, `shared/config-check.mjs` вне Vite-импорта `runner/` (кроме `history.mjs`) | частично: остался `runner/history.mjs` в UI-бандле |
+| W1 | Один валидатор проекта для импорта (`shared/config-check.mjs`), `skipped` в истории (Node и Rust), golden-таблица URL (`shared/url-golden.json`, `url-golden.test.mjs`), лимиты конфигурации | готово |
+| W2 | Один каталог прогонов через `UXPROOF_RUNS_DIR`, одинаковая семантика `.audit.lock` в Node и Rust, `cancel_audit` вместо AbortSignal, trace через IPC | готово, кроме установки на чистую VM |
+| W3 | Опциональная строгая схема отчёта (`report-schema.test.mjs`), сравнение `/` → `/fixed` закреплено тестами | готово с оговорками якорей |
+| W4 | Геометрия в карточке с подписью viewport×DPR, trace и `input.json` через IPC, нативный checkbox ИИ | готово: живая Ollama проверена `npm run qa:ollama` |
+| W5 | `runner/detectors.mjs`: три новых правила реестра, отключение через `disabledRules`, падение детектора не валит аудит | базовый реестр готов |
+| W6 | Разрезаны `audit.mjs` (`audit-control.mjs`, `audit-finalize.mjs`, `detectors.mjs`), `lib.rs` (`url.rs`, `spawn.rs`, `commands.rs`), `App.tsx` (`ReportSection`, `lib/format.tsx`) | готово |
+| W7 | Excel: `runner/xlsx.mjs`, `export-xlsx.mjs`, `report.xlsx`, IPC `export_xlsx`, `/api/xlsx`, кнопка в UI | готово |
+| W8 | `UXPROOF_DEV_TOKEN` обязателен для run/cancel/history при запуске, MCP stdio-сервер поверх dev API | готово: MCP-клиент подключён (`mcp-client.integration.test.mjs`) |
+| W9a | `runner/planner.mjs`: генерация шагов, sanitize, общий `validateConfig`, превью и подтверждение в UI | готово: живой `qwen2.5:3b` проверен `npm run qa:ollama` |
+| W10 | FEATURE-MATRIX, CORE, TEST_PLAN, demo, PITCH | этот срез |
+
+Не закрыто кодом: полная установка MSI на чистую Windows VM (см. `docs/VM-ACCEPTANCE.md`), первый hop HTTP-redirect без MITM, fuzzy UX-регрессии, полный WCAG и поиск всех секретов на PNG. Живые прогоны модели, планировщика, MCP-клиента и IPC в собранном окне выполнены 19.11.2026.
 
 ## C03 — контракт результатов: начато
 
@@ -12,9 +46,11 @@
 
 Проверено: `test:runner` 34/34, `cargo test` 8/8, `npm run tauri build`, два `smoke` 5/9 с ожидаемыми дефектами, `test:fix` 9/9 и `test:edge` успешно. В двух новых отчётах Relay все ID нормализованных находок совпали; три упавших шага настроек объединены с отдельными наблюдениями. Проверена схема v0.2 через Python jsonschema. Пример: `.uxproof-data/runs/fb932492-aed3-4f2e-bd2e-1231066f72e8/report.json`.
 
-## C01 — Tauri E2E: не завершено
+## C01 — Tauri E2E: проверено в release-окне
 
-Release-окно Tauri открыто с готовым локальным Relay, и дерево доступности показало кнопку запуска. Средство управления сообщило об отсутствии геометрии при нажатии и таймаутах захвата окна; повторная попытка клавиатурного управления также не перевела фокус к кнопке. Запуск через кнопку и последующие действия не проверены. Ранее другая попытка управления была остановлена из-за ограничения политики URL.
+Раньше управление окном не удавалось: средства захвата возвращали пустое изображение (`PrintWindow` для WebView2), геометрия кнопки отсутствовала. Теперь окно управляется через WebView2 CDP (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`) и `scripts/qa-ipc.mjs`: скрипт нажимает «Запустить аудит», ждёт панель результатов и проверяет счётчики. Прогон в release-сборке: 9/9 сценариев, 3 подтверждённых дефекта, 0 замечаний доступности, кнопки JSON/Excel/HTML на месте.
+
+До исправления два окна-специфичных дефекта полностью блокировали запуск: verbatim-путь `\\?\` в аргументе Node (BUG-025) и повторный захват уже занятого `.audit.lock` (BUG-026). Debug-сборка и dev API их не проявляли. Остаётся установка MSI на чистую Windows VM.
 
 ## C02 — состав ресурсов: частично
 
@@ -64,10 +100,14 @@ Chromium использует локальный аутентифицирова�
 
 Добавлен опциональный `trace: on-failure`: при явном включении сохраняется ZIP только для неудачного сценария, а при обнаруженном чужом origin файл отбрасывается. В интерфейсе и отчёте есть предупреждение: trace может содержать DOM, значения и сетевые данные. Для файла действуют ограничения 20 МиБ и 100 МиБ на прогон после записи, путь и хэш включаются в manifest, HTML содержит относительную ссылку. Ограничения не предотвращают временный расход места во время записи. Интеграционный тест проверил успешный, ошибочный и выключенный режимы и отсутствие trace при чужом origin. Сквозной прогон через локальные UI и dev API на Relay `039caa97-24aa-4f82-84d7-691c3f36974e` дал 5 успешных, 4 ошибочных комбинации и 4 файла trace; Tauri IPC этим не проверялся. Прошли 86 тестов runner и сборка MSI/NSIS. Остаётся полная проверка жизненного цикла и обработка всех ошибок/гонок. Проверка путей не заявляется защитой от гонки локального злоумышленника, изменяющего файловую систему во время чтения. C07 не завершена.
 
-## C09/C10 — реестр и layout: начато
+## C09/C10 — реестр и правила layout: базовый реестр готов
 
 Добавлен версионированный реестр `runner/rules/registry-v0.1.json`, отдельная JSON Schema и runtime-проверка метаданных. Первое подключённое правило `layout:viewport-overflow` использует измерения ширины документа и viewport и прежний допуск 3 CSS px. Его можно отключить через `options.disabledRules` в проектном JSON; импорт проекта сохраняет настройку, отчёт её записывает, а неправильные ID отклоняются. Тесты реального Chromium проверили переполненную страницу, страницу без переполнения и отключение правила; ресурсы runner проверены вне checkout. Схема проверена Python jsonschema. Прошли 80 тестов runner, Rust-тесты, `test:edge`, исправленный Relay 9/9 и сборка MSI/NSIS. Это только первое правило: общий исполняемый интерфейс детекторов, остальные layout-проверки и полнота реестра остаются открытыми.
 
-## C11 — проверка текста: начато
+## C11 — проверка текста: базовые правила готовы
+
+Реестр содержит два текстовых правила: `copy:duplicate-heading` и `copy:repeated-button-name`. Оба исполняются через общий интерфейс `runner/detectors.mjs` и проверяются в `copy-headings.integration.test.mjs` и `detectors.integration.test.mjs` на реальном Chromium, включая выключение через `disabledRules`.
 
 Реестр содержит `copy:duplicate-heading`: детектор сопоставляет видимые в viewport заголовки и выдаёт гипотезу с PNG, если есть точные повторы после нормализации регистра и пробелов. Исходный текст не переносится из браузера в JSON/HTML; записываются только счётчики. Проверка ограничена 5000 элементами и временем, скрытые и внеэкранные заголовки исключаются, усечение отмечается. Повтор может быть оправданным, автоматически текст не меняется. Гипотезы правил подсчитываются отдельно от рекомендаций модели; правило отключается в настройках. Реальный Chromium проверил позитивный, негативный, скрытый и отключённый случаи, а также отсутствие синтетического текста в JSON/HTML. Видимый текст по-прежнему может попасть в PNG: общая защита секретов C08 не завершена. Тесты runner 83/83, Relay fixed 9/9 и сборка MSI/NSIS прошли. UI проверен в Chromium с реальным отчётом и подменёнными ответами API: счётчик гипотез правила и пояснение отделены от ИИ. Проверки других типов копирайта, связанные элементы и более широкое покрытие остаются открытыми.
+
+

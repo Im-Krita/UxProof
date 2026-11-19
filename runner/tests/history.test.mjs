@@ -55,7 +55,7 @@ test('history API skips invalid and truncated files while retaining legacy recor
         if (match) { clearTimeout(timer); resolve(`http://127.0.0.1:${match[1]}`); }
       });
     });
-    const response = await fetch(`${address}/api/history`);
+    const response = await fetch(`${address}/api/history`, { headers: { 'X-UXProof-Client': '1' } });
     assert.equal(response.status, 200);
     const page = await response.json();
     assert.equal(page.reports.length, 1);

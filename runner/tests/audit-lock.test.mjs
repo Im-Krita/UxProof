@@ -41,3 +41,23 @@ test('a dead process pid is reclaimed', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a parent that already holds the lock lets its sidecar skip locking', async () => {
+  // The desktop app keeps the OS lock for the whole IPC call and writes its own
+  // live pid, so a second attempt here would always look like a conflict (BUG-026).
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'uxproof-lock-held-'));
+  await fs.writeFile(path.join(dir, '.audit.lock'), String(process.pid));
+  const previous = process.env.UXPROOF_LOCK_HELD;
+  try {
+    assert.throws(() => acquireRunsLock(dir), ConflictError);
+    process.env.UXPROOF_LOCK_HELD = '1';
+    const release = acquireRunsLock(dir);
+    assert.equal(typeof release, 'function');
+    release();
+    assert.equal(await fs.readFile(path.join(dir, '.audit.lock'), 'utf8'), String(process.pid), 'parent lock must stay intact');
+  } finally {
+    if (previous === undefined) delete process.env.UXPROOF_LOCK_HELD;
+    else process.env.UXPROOF_LOCK_HELD = previous;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

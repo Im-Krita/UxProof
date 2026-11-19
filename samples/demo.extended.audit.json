@@ -1,0 +1,45 @@
+{
+  "project": "Relay — расширенный аудит (форма, ожидание, неоднозначный селектор)",
+  "baseUrl": "http://127.0.0.1:4180",
+  "options": { "enableAI": false, "aiProvider": "openai", "trace": "off" },
+  "viewports": [
+    { "id": "desktop", "label": "Desktop", "width": 1440, "height": 900 },
+    { "id": "tablet", "label": "Tablet", "width": 768, "height": 1024 },
+    { "id": "mobile", "label": "Mobile", "width": 390, "height": 844 }
+  ],
+  "scenarios": [
+    {
+      "id": "profile",
+      "title": "Заполнение профиля и сохранение",
+      "steps": [
+        { "type": "click", "name": "Открыть настройки", "target": "role:button|Настройки" },
+        { "type": "fill", "name": "Ввести имя профиля", "target": "label:Имя профиля", "value": "Тестовый профиль" },
+        { "type": "expectValue", "name": "Имя попало в поле", "target": "label:Имя профиля", "value": "Тестовый профиль" },
+        { "type": "wait", "name": "Подождать отрисовку", "target": "", "value": "300" },
+        { "type": "check", "name": "Включить уведомления", "target": "css:#notifications" },
+        { "type": "click", "name": "Сохранить изменения", "target": "role:button|Сохранить" },
+        { "type": "expectVisible", "name": "Увидеть подтверждение сохранения", "target": "css:[role=\"status\"]" }
+      ]
+    },
+    {
+      "id": "login",
+      "title": "Вход по неоднозначному селектору",
+      "steps": [
+        { "type": "navigate", "name": "Открыть страницу входа", "target": "", "value": "/login" },
+        { "type": "fill", "name": "Ввести почту", "target": "label:Почта", "value": "demo@relay.test" },
+        { "type": "fill", "name": "Ввести пароль", "target": "label:Пароль", "value": "••••••" },
+        { "type": "click", "name": "Войти (текстовый селектор)", "target": "text:Войти" },
+        { "type": "expectText", "name": "Убедиться во входе", "target": "css:#login-state", "value": "Вы вошли" }
+      ]
+    },
+    {
+      "id": "navigation",
+      "title": "Возврат на главную",
+      "steps": [
+        { "type": "navigate", "name": "Открыть настройки напрямую", "target": "", "value": "/settings" },
+        { "type": "click", "name": "Вернуться на главную", "target": "role:button|На главную" },
+        { "type": "expectVisible", "name": "Главный экран появился", "target": "css:#dashboard" }
+      ]
+    }
+  ]
+}

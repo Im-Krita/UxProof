@@ -3,10 +3,13 @@ import { findingId } from './findings.mjs';
 const nonempty = value => typeof value === 'string' && value.trim().length > 0;
 const fail = () => { throw new TypeError('Invalid normalized report'); };
 
+const CONFIRMED_LAYOUT_RULES = new Set(['layout:viewport-overflow', 'layout:text-overflow', 'layout:min-tap-target']);
+const RECOMMENDATION_COPY_RULES = new Set(['copy:duplicate-heading', 'copy:repeated-button-name']);
+
 const v03 = observation => {
   const runtime = observation.source === 'runtime' && observation.classification === 'technical-fact' && observation.ruleId === 'javascript:pageerror' && observation.status === 'confirmed';
-  const layout = observation.source === 'layout' && observation.classification === 'rule-violation' && observation.ruleId === 'layout:viewport-overflow' && observation.status === 'confirmed';
-  const copy = observation.source === 'copy' && observation.classification === 'hypothesis' && observation.ruleId === 'copy:duplicate-heading' && observation.status === 'recommendation';
+  const layout = observation.source === 'layout' && observation.classification === 'rule-violation' && CONFIRMED_LAYOUT_RULES.has(observation.ruleId) && observation.status === 'confirmed';
+  const copy = observation.source === 'copy' && observation.classification === 'hypothesis' && RECOMMENDATION_COPY_RULES.has(observation.ruleId) && observation.status === 'recommendation';
   const ai = observation.source === 'ai' && observation.classification === 'hypothesis' && observation.ruleId.startsWith('ai-ux:') && observation.status === 'recommendation';
   return runtime || layout || copy || ai;
 };

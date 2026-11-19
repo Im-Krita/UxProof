@@ -1,6 +1,40 @@
 # План проверки и приёмки — UXProof v0.1
 
-**Это список запланированных проверок, не отчёт об их прохождении.** Фактические результаты см. `VALIDATION.md`.
+**Это список запланированных проверок, не отчёт об их прохождении.** Фактические результаты см. `VALIDATION.md` и `FINAL-AUDIT-REPORT.md`.
+
+Статус автоматизации на 19.11.2026:
+
+- `npm run test:runner` — 125 тестов, 124 pass, 1 skip (HTTPS-прокси без Python `cryptography`).
+- `cargo test --locked` — 17/17.
+- `npm run build` — успешно.
+
+Соответствие проверок автотестам:
+
+| QA | Доказательство |
+|---|---|
+| QA-01, QA-02 | `npm ci`, `npx playwright install chromium` выполнены на этой машине |
+| QA-05, QA-06…QA-14 | `scripts/smoke.mjs` (Relay `/`) и `scripts/verify-fix.mjs` (`/fixed`) |
+| QA-16, QA-17, QA-18 | `runner/tests/ai.test.mjs`, smoke с `enableAI: false` |
+| QA-21, QA-22 | `runner/tests/report-schema.test.mjs`, `validators.test.mjs` |
+| QA-23, QA-24 | `runner/tests/validators.test.mjs` — `renderHtml`: XSS в названии и отказ от `../` |
+| QA-25, QA-26, QA-27 | `policy.test.mjs`, `validators.test.mjs`, `test:edge` |
+| QA-28 | `comparison.integration.test.mjs`, прогоны `/` → `/fixed` |
+| QA-29, QA-32 | `cancel.test.mjs`, `failure-evidence.test.mjs` |
+| QA-34, QA-35, QA-39 | `detectors.integration.test.mjs`, `rules.integration.test.mjs` |
+| QA-37 | `privacy.test.mjs` |
+| QA-40 | `runner/tests/xlsx.test.mjs` |
+| QA-41 | `runner/tests/dev-token.test.mjs` |
+| QA-43, QA-44 | `runner/tests/planner.test.mjs` |
+| QA-45 | `shared/config-check.mjs` и `runner/tests/validators.test.mjs` |
+| QA-46 | `runner/tests/history.test.mjs` |
+| QA-47 | `runner/tests/axe-guard.integration.test.mjs` |
+| QA-20 (живая модель), QA-48 | `scripts/qa-ollama.mjs` (Ollama `qwen2.5vl:3b` + `qwen2.5:3b`) |
+| QA-30 (окно), QA-49 | `scripts/qa-ipc.mjs` в release-окне через WebView2 CDP |
+| QA-42 (MCP-клиент), QA-50 | `runner/tests/mcp-client.integration.test.mjs` |
+
+Ручные и непроверенные пункты: QA-19, QA-31, QA-36, QA-38, а также установка MSI на чистую VM — `docs/VM-ACCEPTANCE.md`.
+
+Легенда: **авто** — покрыто тестом, **ручной** — нужен прогон человеком, **нет** — не проверялось.
 
 | ID | Приёмочный тест | Ожидаемый результат | Приоритет |
 |---|---|---|---|
@@ -42,6 +76,18 @@
 | QA-36 | Страница с login-экраном | Runner не пытается обойти авторизацию; сценарий падает прозрачно | P1 |
 | QA-37 | Проверка локального хранения ключа API | Нет в JSON отчёта, HTML и логах | P0 |
 | QA-38 | Rust + Tauri release bundle | Проверка компиляции и зависимостей | P1 |
+| QA-39 | Детекторы реестра (`layout:min-tap-target`, `layout:text-overflow`, `copy:repeated-button-name`) | Счётчики и пороги в отчёте, отключение через `disabledRules` | P1 |
+| QA-40 | Экспорт Excel | `report.xlsx` открывается, листы «Сводка», «Проблемы», «Прогоны» | P1 |
+| QA-41 | Запуск dev API без `UXPROOF_DEV_TOKEN` | `/api/run`, `/api/cancel`, `/api/history` отвечают 403 без токена | P0 |
+| QA-42 | MCP stdio с токеном | `tools/list` возвращает `run_audit`, `cancel`, `list_reports`, `get_report` | P1 |
+| QA-43 | Планировщик: «Сгенерировать шаги» | Превью шагов, «Применить план» заменяет шаги сценария; без подтверждения ничего не запускается | P1 |
+| QA-44 | Планировщик с `navigate` на чужой origin | Шаг отброшен до запуска аудита | P0 |
+| QA-45 | Импорт проекта с `javascript:`/`file:`/пустым `expectText` | Импорт отклонён до кнопки запуска | P0 |
+| QA-46 | История с повреждённой записью | Запись пропущена, показано число `skipped`, файл не удалён | P1 |
+| QA-47 | Страница с нарушением контраста при включённом стороже посторонних страниц | `color-contrast` попадает в отчёт, предупреждений `axe … Target page … has been closed` нет | P0 |
+| QA-48 | `npm run qa:ollama` при запущенных Ollama и `npm run demo` | Живой планировщик возвращает валидные шаги, живая vision-модель даёт рекомендации, предупреждений `ИИ` нет | P1 |
+| QA-49 | `npm run qa:ipc` в собранном приложении | Окно запускает прогон, показывает 9/9 и дефекты, кнопки JSON/Excel/HTML доступны | P0 |
+| QA-50 | Официальный MCP-клиент по stdio | `initialize`, `tools/list`, `run_audit`, `list_reports`, `get_report`, `cancel`; без токена сервер не стартует | P1 |
 
 ## Воспроизводимость контрольных ошибок
 

@@ -28,6 +28,47 @@
       "remediation": "Проверить контекст повторения вручную; одинаковые заголовки могут быть необходимы.",
       "fixtures": ["duplicate-visible-headings", "unique-visible-headings", "hidden-duplicate"],
       "status": "enabled"
+    },
+    {
+      "ruleId": "layout:min-tap-target",
+      "version": "1.0.0",
+      "title": "Маленькие интерактивные области",
+      "category": "layout",
+      "scope": "viewport",
+      "requiredEvidence": ["elementBoundingRect", "viewportScreenshot"],
+      "trigger": { "type": "min-tap-target", "minSizeCssPx": 24 },      "exclusions": ["hidden-elements", "zero-size-elements", "outside-viewport"],
+      "classification": "technical-fact",
+      "remediation": "Увеличить область нажатия или добавить отступы вокруг элемента.",
+      "fixtures": ["small-tap-targets", "large-tap-targets"],
+      "status": "enabled"
+    },
+    {
+      "ruleId": "layout:text-overflow",
+      "version": "1.0.0",
+      "title": "Обрезанный текст с многоточием",
+      "category": "layout",
+      "scope": "viewport",
+      "requiredEvidence": ["scrollWidth", "clientWidth"],
+      "trigger": { "type": "text-overflow", "minOverflowPx": 1 },
+      "exclusions": ["hidden-elements", "visible-full-text"],
+      "classification": "technical-fact",
+      "remediation": "Убедиться, что полный текст доступен иначе: в подсказке, заголовке или на детальной странице.",
+      "fixtures": ["ellipsis-overflow", "ellipsis-fits"],
+      "status": "enabled"
+    },
+    {
+      "ruleId": "copy:repeated-button-name",
+      "version": "1.0.0",
+      "title": "Возможно, повторяются названия кнопок",
+      "category": "copy",
+      "scope": "viewport",
+      "requiredEvidence": ["visibleButtonName", "viewportScreenshot"],
+      "trigger": { "type": "repeated-button-name", "minOccurrences": 2 },
+      "exclusions": ["hidden-elements", "short-or-long-text"],
+      "classification": "semantic-hypothesis",
+      "remediation": "Проверить, различает ли пользователь одинаковые действия; при необходимости уточнить подписи.",
+      "fixtures": ["repeated-button-names", "unique-button-names"],
+      "status": "enabled"
     }
   ]
 }

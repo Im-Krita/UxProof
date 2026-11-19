@@ -7,7 +7,7 @@
 <script>
   (function () {
     var path = location.pathname.replace(/\/+$/, '') || '/';
-    document.documentElement.dataset.variant = path === '/fixed' ? 'fixed' : 'buggy';
+    document.documentElement.dataset.variant = path.indexOf('/fixed') === 0 ? 'fixed' : 'buggy';
   })();
 </script>
 <style>
@@ -62,12 +62,20 @@ const hint = document.querySelector('#demo-hint');
 if (hint && fixed) hint.textContent = 'Исправленный вариант: есть подтверждение сохранения, кнопка возврата видна, нет исключения и горизонтального вылета.';
 const content = document.querySelector('#content');
 let selected = 'us-east';
+// Same-origin routes: /settings, /servers and /login open directly, /fixed/... is
+// the repaired variant. Nothing is rendered from the path beyond these names.
+const route = (location.pathname.replace(/\/+$/, '') || '/').replace(/^\/fixed/, '') || '/';
 function render(page) {
   if (page === 'servers') {
     content.innerHTML = '<h2>Серверы</h2><label for="server-select">Выберите сервер</label><select id="server-select"><option value="us-east">US East</option><option value="eu-west">EU West</option></select><div class="row"><button class="primary" id="connect" type="button">Подключиться</button><span id="connection-state">Не подключено</span></div>';
   } else if (page === 'settings') {
     const probe = fixed ? '' : '<div class="overflow-probe" id="overflow-probe"></div>';
-    content.innerHTML = '<h2>Настройки</h2><label for="notifications">Уведомления</label><input id="notifications" type="checkbox">' + probe + '<div class="row"><button class="primary" id="save" type="button">Сохранить</button></div><button class="back" id="back-home" type="button">На главную</button><p class="bad-contrast">Настройки применяются немедленно.</p>';
+    content.innerHTML = '<h2>Настройки</h2><label for="notifications">Уведомления</label><input id="notifications" type="checkbox">' + probe + '<div class="row"><button class="primary" id="save" type="button">Сохранить</button></div><button class="back" id="back-home" type="button">На главную</button><p class="bad-contrast">Настройки применяются немедленно.</p><label for="profile-name">Имя профиля</label><input id="profile-name" type="text" autocomplete="off">';
+  } else if (page === 'login') {
+    // Buggy variant repeats the same button name twice, so a single-name locator
+    // is ambiguous; the fixed variant has exactly one submit control.
+    const extra = fixed ? '' : '<button class="primary" id="login-again" type="button">Войти</button>';
+    content.innerHTML = '<h2>Вход</h2><label for="email">Почта</label><input id="email" type="email" autocomplete="username"><label for="password">Пароль</label><input id="password" type="password" autocomplete="current-password">' + extra + '<div class="row"><button class="primary" id="login" type="button">Войти</button><span id="login-state">Не выполнен</span></div>';
   } else {
     content.innerHTML = '<section id="dashboard"><h2>Главная</h2><p>Добро пожаловать в панель управления Relay.</p><button id="choose-server" type="button">Выбрать сервер</button></section>';
   }
@@ -76,6 +84,11 @@ function render(page) {
     document.querySelector('#server-select').addEventListener('change', event => { selected = event.target.value; });
     document.querySelector('#connect').addEventListener('click', () => {
       document.querySelector('#connection-state').textContent = 'Подключено';
+    });
+  }
+  if (page === 'login') {
+    document.querySelector('#login').addEventListener('click', () => {
+      document.querySelector('#login-state').textContent = 'Вы вошли как demo@relay.test';
     });
   }
   if (page === 'settings') {
@@ -96,7 +109,7 @@ function render(page) {
   if (page === 'home') document.querySelector('#choose-server').addEventListener('click', () => render('servers'));
 }
 for (const name of ['home', 'servers', 'settings']) document.querySelector('#' + name + '-nav').addEventListener('click', () => render(name));
-render('home');
+render({ '/settings': 'settings', '/servers': 'servers', '/login': 'login' }[route] || 'home');
 </script>
 </body>
 </html>

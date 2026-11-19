@@ -22,7 +22,7 @@ test('field assertion values do not appear in persisted JSON or HTML', async () 
     assert.ok(result.scenarioEvents.at(-1).elementGeometry);
     assert.equal(result.scenarioEvents.at(-1).elementGeometry.deviceScaleFactor, 1);
     assert.ok(!JSON.stringify(result.scenarioEvents.at(-1).elementGeometry).includes('actual-test-secret'));
-    for (const filename of ['report.json', 'report.html', 'artifacts.json']) {
+    for (const filename of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) {
       const text = await fs.readFile(path.join(dir, filename), 'utf8');
       assert.ok(!text.includes('actual-test-secret'));
       assert.ok(!text.includes('expected-test-secret'));
@@ -33,7 +33,7 @@ test('field assertion values do not appear in persisted JSON or HTML', async () 
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });
@@ -48,7 +48,7 @@ test('page exception messages are not persisted while the error remains visible'
       scenarios: [{ id: 's', title: 'test', steps: [{ type: 'wait', name: 'wait', value: '100' }] }],
       viewports: [{ id: 'v', width: 390, height: 844 }], options: { enableAI: false } });
     assert.equal(result.issues.filter(issue => issue.kind === 'javascript').length, 1);
-    for (const filename of ['report.json', 'report.html', 'artifacts.json']) {
+    for (const filename of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) {
       assert.ok(!(await fs.readFile(path.join(dir, filename), 'utf8')).includes('exception-secret-92741'));
     }
   } finally {
@@ -56,7 +56,7 @@ test('page exception messages are not persisted while the error remains visible'
     const shots = path.join(dir, 'screenshots');
     for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
     await fs.rmdir(shots).catch(() => {});
-    for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+    for (const file of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
     await fs.rmdir(dir);
   }
 });
@@ -85,7 +85,7 @@ test('failure and final screenshots hide scenario values echoed into visible tex
       const failed = report.results[0].steps.at(-1);
       assert.equal(failed.status, 'failed');
       images.push(await Promise.all([failed.screenshot, report.results[0].screenshot].map(file => fs.readFile(path.join(root, name, 'screenshots', file)))));
-      for (const file of ['report.json', 'report.html']) assert.ok(!(await fs.readFile(path.join(root, name, file), 'utf8')).includes(value));
+      for (const file of ['report.json', 'report.html', 'report.xlsx']) assert.ok(!(await fs.readFile(path.join(root, name, file), 'utf8')).includes(value));
     }
     assert.deepEqual(images[0][0], images[1][0], 'failure screenshot must not expose echoed value');
     assert.deepEqual(images[0][1], images[1][1], 'final screenshot must not expose echoed value');
@@ -100,7 +100,7 @@ test('failure and final screenshots hide scenario values echoed into visible tex
       const dir = path.join(root, name), shots = path.join(dir, 'screenshots');
       for (const file of await fs.readdir(shots).catch(() => [])) await fs.unlink(path.join(shots, file));
       await fs.rmdir(shots).catch(() => {});
-      for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+      for (const file of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
       await fs.rmdir(dir).catch(() => {});
     }
     await fs.rmdir(root);

@@ -7,7 +7,21 @@ const keysAre = (value, keys) => value && typeof value === 'object' && !Array.is
 const ruleFields = ['ruleId', 'version', 'title', 'category', 'scope', 'requiredEvidence', 'trigger', 'exclusions', 'classification', 'remediation', 'fixtures', 'status'];
 const validTrigger = trigger => (keysAre(trigger, ['type', 'toleranceCssPx']) && trigger.type === 'viewport-overflow' &&
   typeof trigger.toleranceCssPx === 'number' && Number.isFinite(trigger.toleranceCssPx) && trigger.toleranceCssPx >= 0 && trigger.toleranceCssPx <= 20) ||
-  (keysAre(trigger, ['type', 'minOccurrences']) && trigger.type === 'duplicate-headings' && trigger.minOccurrences === 2);
+  (keysAre(trigger, ['type', 'minSizeCssPx']) && trigger.type === 'min-tap-target' &&
+    Number.isInteger(trigger.minSizeCssPx) && trigger.minSizeCssPx >= 16 && trigger.minSizeCssPx <= 48) ||
+  (keysAre(trigger, ['type', 'minOverflowPx']) && trigger.type === 'text-overflow' &&
+    Number.isInteger(trigger.minOverflowPx) && trigger.minOverflowPx >= 1 && trigger.minOverflowPx <= 16) ||
+  (keysAre(trigger, ['type', 'minOccurrences']) &&
+    ['duplicate-headings', 'repeated-button-name'].includes(trigger.type) &&
+    Number.isInteger(trigger.minOccurrences) && trigger.minOccurrences >= 2 && trigger.minOccurrences <= 5);
+
+const TRIGGER_CLASSIFICATION = {
+  'viewport-overflow': 'technical-fact',
+  'text-overflow': 'technical-fact',
+  'min-tap-target': 'technical-fact',
+  'duplicate-headings': 'semantic-hypothesis',
+  'repeated-button-name': 'semantic-hypothesis'
+};
 
 export function validateRegistry(registry) {
   if (!keysAre(registry, ['schemaVersion', 'rules']) || registry.schemaVersion !== '0.1' || !Array.isArray(registry.rules) || !registry.rules.length) throw TypeError('Invalid rule registry');
@@ -17,8 +31,7 @@ export function validateRegistry(registry) {
         !/^\d+\.\d+\.\d+$/.test(rule.version || '') || ![rule.title, rule.category, rule.scope, rule.remediation].every(nonempty) ||
         !stringList(rule.requiredEvidence, 1) || !stringList(rule.exclusions) || !stringList(rule.fixtures, 1) ||
         !validTrigger(rule.trigger) || !['technical-fact', 'semantic-hypothesis'].includes(rule.classification) ||
-        (rule.trigger.type === 'viewport-overflow' && rule.classification !== 'technical-fact') ||
-        (rule.trigger.type === 'duplicate-headings' && rule.classification !== 'semantic-hypothesis') ||
+        rule.classification !== TRIGGER_CLASSIFICATION[rule.trigger.type] ||
         !['enabled', 'disabled'].includes(rule.status)) throw TypeError('Invalid rule');
     ids.add(rule.ruleId);
   }

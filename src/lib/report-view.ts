@@ -1,2 +1,2 @@
 export { compareFindings, displayViewportLabel, findingIssue, presentableFindings, recheckedSteps } from '../../shared/matching.mjs';
-export { screenshotOutline } from '../../shared/geometry-view.mjs';
+export { evidenceCaption, evidenceGeometry, screenshotOutline } from '../../shared/geometry-view.mjs';

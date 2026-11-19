@@ -41,7 +41,7 @@ test('trace is opt-in, saved only for failures and included in the portable mani
       await fs.rmdir(shots).catch(() => {});
       for (const file of await fs.readdir(traces).catch(() => [])) await fs.unlink(path.join(traces, file));
       await fs.rmdir(traces).catch(() => {});
-      for (const file of ['report.json', 'report.html', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
+      for (const file of ['report.json', 'report.html', 'report.xlsx', 'artifacts.json']) await fs.unlink(path.join(dir, file)).catch(() => {});
       await fs.rmdir(dir).catch(() => {});
     }
     await fs.rmdir(root);
